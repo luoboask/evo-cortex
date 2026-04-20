@@ -3,7 +3,7 @@
 **完整的记忆、学习和进化能力 - 让 Agent 真正越用越聪明！**
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/luoboask/evo-cortex)
-[![npm](https://img.shields.io/npm/v/@haoran51/evo-cortex.svg)](https://www.npmjs.com/package/@haoran51/evo-cortex)
+[![npm](https://img.shields.io/npm/v/@evo-agents/evo-cortex.svg)](https://www.npmjs.com/package/@evo-agents/evo-cortex)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/luoboask/evo-cortex/blob/main/LICENSE)
 [![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.3.13+-orange.svg)](https://github.com/openclaw/openclaw)
 
@@ -31,7 +31,7 @@ Evo-Cortex 不是一个普通的插件，它是 Agent 的**"大脑"**，让 Agen
 
 ```bash
 # 1. 安装插件
-openclaw plugins install @haoran51/evo-cortex
+openclaw plugins install @evo-agents/evo-cortex
 
 # 2. 一键配置（推荐 Full 级别）
 ~/.openclaw/extensions/evo-cortex/scripts/quick-setup.sh <your-agent-id>
@@ -40,7 +40,7 @@ openclaw plugins install @haoran51/evo-cortex
 ~/.openclaw/extensions/evo-cortex/scripts/verify-setup.sh <your-agent-id>
 ```
 
-**npm 包页面**: https://www.npmjs.com/package/@haoran51/evo-cortex
+**npm 包页面**: https://www.npmjs.com/package/@evo-agents/evo-cortex
 
 ---
 
@@ -458,15 +458,15 @@ git push origin feature/your-feature
 ### 2026-04-21 - npm 发布 🎉
 
 **📦 正式发布到 npm**:
-- 包名：`@haoran51/evo-cortex`
+- 包名：`@evo-agents/evo-cortex`
 - 版本：1.0.0
 - 状态：✅ 已发布并可安装
-- 页面：https://www.npmjs.com/package/@haoran51/evo-cortex
+- 页面：https://www.npmjs.com/package/@evo-agents/evo-cortex
 
 **安装方式更新**:
 ```bash
 # 推荐方式（npm）
-openclaw plugins install @haoran51/evo-cortex
+openclaw plugins install @evo-agents/evo-cortex
 
 # 开发方式（本地）
 openclaw plugins install ~/.openclaw/extensions/evo-cortex
@@ -510,7 +510,7 @@ openclaw plugins install ~/.openclaw/extensions/evo-cortex
 
 ## 📞 联系方式
 
-- **npm**: https://www.npmjs.com/package/@haoran51/evo-cortex
+- **npm**: https://www.npmjs.com/package/@evo-agents/evo-cortex
 - **GitHub**: https://github.com/luoboask/evo-cortex
 - **Issues**: https://github.com/luoboask/evo-cortex/issues
 - **OpenClaw Docs**: https://docs.openclaw.ai
@@ -531,7 +531,7 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 **立即开始**:
 ```bash
 # 方式 1: npm 安装（推荐）
-openclaw plugins install @haoran51/evo-cortex
+openclaw plugins install @evo-agents/evo-cortex
 
 # 方式 2: 本地安装（开发）
 openclaw plugins install ~/.openclaw/extensions/evo-cortex
