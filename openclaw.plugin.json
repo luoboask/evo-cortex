@@ -1,0 +1,118 @@
+{
+  "id": "evo-cortex",
+  "name": "Evo-Cortex Plugin",
+  "description": "完整的记忆、学习和进化能力 - Give Your Agent a Brain",
+  "version": "1.0.0",
+  "author": "Evo-Agents Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/evo-agents/openclaw-plugin-evo-agents"
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": true,
+    "properties": {
+      "agent_name": {
+        "type": "string",
+        "description": "Agent 名称",
+        "default": "demo100-agent"
+      },
+      "memory": {
+        "type": "object",
+        "description": "记忆系统配置",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "top_k": {
+            "type": "number",
+            "description": "搜索结果数量",
+            "default": 5
+          },
+          "auto_store": {
+            "type": "boolean",
+            "description": "是否自动存储对话",
+            "default": true
+          }
+        }
+      },
+      "evolution": {
+        "type": "object",
+        "description": "进化系统配置",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "fractal_thinking": {
+            "type": "boolean",
+            "description": "是否启用分形思考",
+            "default": true
+          },
+          "active_learning": {
+            "type": "boolean",
+            "description": "是否启用主动学习",
+            "default": true
+          }
+        }
+      },
+      "knowledge": {
+        "type": "object",
+        "description": "知识系统配置",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "default": true
+          },
+          "auto_expand": {
+            "type": "boolean",
+            "description": "是否自动扩展知识图谱",
+            "default": true
+          }
+        }
+      }
+    },
+    "required": []
+  },
+  "tools": [
+    {
+      "name": "search_memory",
+      "description": "搜索历史记忆",
+      "optional": false
+    },
+    {
+      "name": "search_knowledge",
+      "description": "检索领域知识",
+      "optional": false
+    },
+    {
+      "name": "advanced_analysis",
+      "description": "高级分析（有副作用）",
+      "optional": true
+    }
+  ],
+  "hooks": [
+    "message_received",
+    "message_sent",
+    "before_tool_call"
+  ],
+  "crons": [
+    {
+      "id": "fractal-thinking",
+      "schedule": "0 * * * *",
+      "description": "每小时执行分形思考"
+    },
+    {
+      "id": "domain-organize",
+      "schedule": "0 2 * * *",
+      "description": "每天 2AM 整理领域知识"
+    },
+    {
+      "id": "domain-review",
+      "schedule": "0 6 * * 0",
+      "description": "每周日 6AM 审查领域知识"
+    }
+  ]
+}
