@@ -1,0 +1,22 @@
+# Code owners for Evo-Cortex
+# https://help.github.com/articles/about-codeowners/
+
+# Default owners (team leads)
+* @luoboask
+
+# Core modules
+src/memory/ @luoboask
+src/knowledge/ @luoboask
+src/evolution/ @luoboask
+
+# Scripts
+scripts/ @luoboask
+
+# Documentation
+*.md @luoboask
+docs/ @luoboask
+
+# Configuration
+package.json @luoboask
+tsconfig.json @luoboask
+.github/ @luoboask
