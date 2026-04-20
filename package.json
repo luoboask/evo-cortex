@@ -1,5 +1,5 @@
 {
-  "name": "@evo-agents/evo-cortex",
+  "name": "@haoran51/evo-cortex",
   "version": "1.0.0",
   "description": "完整的记忆、学习和进化能力 - OpenClaw 插件",
   "type": "module",
