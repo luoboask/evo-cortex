@@ -249,42 +249,10 @@ fi
 echo ""
 
 # ========== 步骤 4: 配置定时任务 ==========
-echo "⏰ 配置 Evo-Cortex 定时任务"
-echo ""
-echo "选择配置级别:"
-echo "  1) basic    - 3 个核心任务（快速上手）"
-echo "  2) standard - 7 个任务（推荐）"
-echo "  3) full     - 9 个任务（完整功能）"
-echo ""
-read -p "请输入选项 (1-3, 默认 2): " level_choice
-
-case "${level_choice:-2}" in
-  1) LEVEL="basic" ;;
-  2) LEVEL="standard" ;;
-  3) LEVEL="full" ;;
-  *) echo "无效选项，使用 standard"; LEVEL="standard" ;;
-esac
-
-echo ""
-echo "选择执行模式:"
-echo "  1) script - 快速、免费（推荐）"
-echo "  2) llm    - 智能、付费"
-echo "  3) hybrid - 混合模式（平衡）"
-echo ""
-read -p "请输入选项 (1-3, 默认 1): " mode_choice
-
-case "${mode_choice:-1}" in
-  1) MODE="script" ;;
-  2) MODE="llm" ;;
-  3) MODE="hybrid" ;;
-  *) echo "无效选项，使用 script"; MODE="script" ;;
-esac
-
-echo ""
-echo "开始配置定时任务..."
+echo "⏰ 配置 Evo-Cortex 定时任务 (full 级别，9 个任务)"
 echo ""
 
-bash "$SCRIPT_DIR/setup-crons-hybrid.sh" "$AGENT_ID" "$LEVEL" "script"
+bash "$SCRIPT_DIR/setup-crons-hybrid.sh" "$AGENT_ID"
 
 # ========== 步骤 5: 完成 ==========
 echo ""
@@ -297,8 +265,7 @@ if [ "$CREATE_NEW" = true ]; then
 else
   echo "  状态：✓ 已存在"
 fi
-echo "  配置级别：$LEVEL"
-echo "  执行模式：$MODE"
+echo "  配置级别：full (9 个任务)"
 echo ""
 echo "下一步:"
 echo "  1. 验证配置："

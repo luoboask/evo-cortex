@@ -1,27 +1,26 @@
 #!/bin/bash
 # Evo-Cortex Cron 配置脚本
-# 参考 demo100-agent/install.sh 结构
+# 默认 full 级别，创建所有 9 个任务
 
 set -e
 
 AGENT_NAME="${1:-}"
-LEVEL="${2:-standard}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EVO_CORTEX_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 if [ -z "$AGENT_NAME" ]; then
   echo "❌ 错误：请指定 Agent 名称"
-  echo "用法：$0 <agent-name> [basic|standard|full]"
+  echo "用法：$0 <agent-name>"
   exit 1
 fi
 
 echo "╔════════════════════════════════════════════════════════╗"
-echo "║  🧬 Evo-Cortex Cron 配置                                 ║"
+echo "║  🧬 Evo-Cortex Cron 配置 (Full)                          ║"
 echo "╚════════════════════════════════════════════════════════╝"
 echo ""
 echo "📦 Agent: $AGENT_NAME"
 echo "📁 Workspace: $HOME/.openclaw/workspace-$AGENT_NAME"
-echo "📊 Level: $LEVEL"
+echo "📊 Level: full (默认，9 个任务)"
 echo ""
 
 # 注册到 OpenClaw
@@ -40,7 +39,7 @@ echo "   ✅ 完成"
 echo ""
 
 # 核心任务
-echo "📋 配置核心任务..."
+echo "📋 配置核心任务 (basic)..."
 
 # 1. hourly-fractal (每小时)
 echo "   - hourly-fractal (每小时)..."
@@ -72,76 +71,73 @@ openclaw cron add \
   --no-deliver \
   --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
 
-# 根据级别配置更多任务
-if [ "$LEVEL" = "standard" ] || [ "$LEVEL" = "full" ]; then
-  echo ""
-  echo "📋 配置增强任务 (standard)..."
-  
-  # 4. daily-compress (每天 09:30)
-  echo "   - daily-compress (每天 09:30)..."
-  openclaw cron add \
-    --cron "0 9:30 * * *" \
-    --agent "$AGENT_NAME" \
-    --message "请压缩昨天的记忆，生成摘要" \
-    --name "$AGENT_NAME-daily-compress" \
-    --no-deliver \
-    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
-  
-  # 5. weekly-compress (每周日 03:00)
-  echo "   - weekly-compress (每周日 03:00)..."
-  openclaw cron add \
-    --cron "0 3 * * 0" \
-    --agent "$AGENT_NAME" \
-    --message "请压缩本周的记忆，生成摘要" \
-    --name "$AGENT_NAME-weekly-compress" \
-    --no-deliver \
-    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
-  
-  # 6. weekly-kg-expansion (每周日 05:00)
-  echo "   - weekly-kg-expansion (每周日 05:00)..."
-  openclaw cron add \
-    --cron "0 5 * * 0" \
-    --agent "$AGENT_NAME" \
-    --message "请扩展知识图谱，发现新关联" \
-    --name "$AGENT_NAME-kg-expansion" \
-    --no-deliver \
-    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
-  
-  # 7. monthly-cycle (每月 1 号 02:00)
-  echo "   - monthly-cycle (每月 1 号 02:00)..."
-  openclaw cron add \
-    --cron "0 2 1 * *" \
-    --agent "$AGENT_NAME" \
-    --message "请执行月度进化周期，审查并优化" \
-    --name "$AGENT_NAME-monthly-cycle" \
-    --no-deliver \
-    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
-fi
+# 增强任务
+echo ""
+echo "📋 配置增强任务 (standard)..."
 
-if [ "$LEVEL" = "full" ]; then
-  echo ""
-  echo "📋 配置高级任务 (full)..."
-  
-  # 8. session-scan (每 30 分钟)
-  echo "   - session-scan (每 30 分钟)..."
-  openclaw cron add \
-    --cron "*/30 * * * *" \
-    --agent "$AGENT_NAME" \
-    --message "请扫描最近会话，提取关键记忆" \
-    --name "$AGENT_NAME-session-scan" \
-    --no-deliver \
-    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
-  
-  # 9. realtime-index (每 5 分钟)
-  echo "   - realtime-index (每 5 分钟)..."
-  openclaw cron add \
-    --cron "*/5 * * * *" \
-    --agent "$AGENT_NAME" \
-    --message "请更新搜索索引" \
-    --name "$AGENT_NAME-realtime-index" \
-    --no-deliver \
-    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
-fi
+# 4. daily-compress (每天 09:30)
+echo "   - daily-compress (每天 09:30)..."
+openclaw cron add \
+  --cron "0 9:30 * * *" \
+  --agent "$AGENT_NAME" \
+  --message "请压缩昨天的记忆，生成摘要" \
+  --name "$AGENT_NAME-daily-compress" \
+  --no-deliver \
+  --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+
+# 5. weekly-compress (每周日 03:00)
+echo "   - weekly-compress (每周日 03:00)..."
+openclaw cron add \
+  --cron "0 3 * * 0" \
+  --agent "$AGENT_NAME" \
+  --message "请压缩本周的记忆，生成摘要" \
+  --name "$AGENT_NAME-weekly-compress" \
+  --no-deliver \
+  --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+
+# 6. weekly-kg-expansion (每周日 05:00)
+echo "   - weekly-kg-expansion (每周日 05:00)..."
+openclaw cron add \
+  --cron "0 5 * * 0" \
+  --agent "$AGENT_NAME" \
+  --message "请扩展知识图谱，发现新关联" \
+  --name "$AGENT_NAME-kg-expansion" \
+  --no-deliver \
+  --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+
+# 7. monthly-cycle (每月 1 号 02:00)
+echo "   - monthly-cycle (每月 1 号 02:00)..."
+openclaw cron add \
+  --cron "0 2 1 * *" \
+  --agent "$AGENT_NAME" \
+  --message "请执行月度进化周期，审查并优化" \
+  --name "$AGENT_NAME-monthly-cycle" \
+  --no-deliver \
+  --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+
+# 高级任务
+echo ""
+echo "📋 配置高级任务 (full)..."
+
+# 8. session-scan (每 30 分钟)
+echo "   - session-scan (每 30 分钟)..."
+openclaw cron add \
+  --cron "*/30 * * * *" \
+  --agent "$AGENT_NAME" \
+  --message "请扫描最近会话，提取关键记忆" \
+  --name "$AGENT_NAME-session-scan" \
+  --no-deliver \
+  --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+
+# 9. realtime-index (每 5 分钟)
+echo "   - realtime-index (每 5 分钟)..."
+openclaw cron add \
+  --cron "*/5 * * * *" \
+  --agent "$AGENT_NAME" \
+  --message "请更新搜索索引" \
+  --name "$AGENT_NAME-realtime-index" \
+  --no-deliver \
+  --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
 
 echo ""
 echo "╔════════════════════════════════════════════════════════╗"

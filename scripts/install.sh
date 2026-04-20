@@ -1,6 +1,6 @@
 #!/bin/bash
 # Evo-Cortex 一键安装脚本
-# 参考 evo-agents/install.sh 结构
+# 默认 full 级别，无需选择
 
 set -e
 
@@ -101,46 +101,14 @@ fi
 # 配置定时任务
 echo ""
 if [ "$LANG" = "zh" ]; then
-    echo "⏰ 配置 Evo-Cortex 定时任务"
+    echo "⏰ 配置 Evo-Cortex 定时任务 (full 级别，9 个任务)..."
 else
-    echo "⏰ Configuring Evo-Cortex cron tasks"
+    echo "⏰ Configuring Evo-Cortex cron tasks (full level, 9 tasks)..."
 fi
 echo ""
 
-# 询问配置级别
-if [ "$LANG" = "zh" ]; then
-    echo "选择配置级别:"
-    echo "  1) basic    - 3 个核心任务（快速上手）"
-    echo "  2) standard - 7 个任务（推荐）"
-    echo "  3) full     - 9 个任务（完整功能）"
-    echo ""
-    read -p "请输入选项 (1-3, 默认 2): " level_choice
-else
-    echo "Select configuration level:"
-    echo "  1) basic    - 3 core tasks"
-    echo "  2) standard - 7 tasks (recommended)"
-    echo "  3) full     - 9 tasks"
-    echo ""
-    read -p "Enter choice (1-3, default 2): " level_choice
-fi
-
-case "${level_choice:-2}" in
-    1) LEVEL="basic" ;;
-    2) LEVEL="standard" ;;
-    3) LEVEL="full" ;;
-    *) 
-       if [ "$LANG" = "zh" ]; then
-           echo "无效选项，使用 standard"
-       else
-           echo "Invalid option, using standard"
-       fi
-       LEVEL="standard" 
-       ;;
-esac
-
-# 执行配置
-echo ""
-bash "$SCRIPT_DIR/setup-crons-hybrid.sh" "$AGENT_NAME" "$LEVEL" script
+# 直接执行 full 配置
+bash "$SCRIPT_DIR/setup-crons-hybrid.sh" "$AGENT_NAME"
 
 # 完成
 echo ""
@@ -151,7 +119,7 @@ if [ "$LANG" = "zh" ]; then
     echo ""
     echo "📊 配置摘要:"
     echo "  Agent: $AGENT_NAME"
-    echo "  级别：$LEVEL"
+    echo "  级别：full (9 个任务)"
     echo ""
     echo "下一步:"
     echo "  1. 验证配置：$SCRIPT_DIR/verify-setup.sh $AGENT_NAME"
@@ -165,7 +133,7 @@ else
     echo ""
     echo "📊 Configuration Summary:"
     echo "  Agent: $AGENT_NAME"
-    echo "  Level: $LEVEL"
+    echo "  Level: full (9 tasks)"
     echo ""
     echo "Next Steps:"
     echo "  1. Verify: $SCRIPT_DIR/verify-setup.sh $AGENT_NAME"
