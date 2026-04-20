@@ -284,7 +284,7 @@ echo ""
 echo "开始配置定时任务..."
 echo ""
 
-bash "$SCRIPT_DIR/setup-crons-hybrid.sh" "$AGENT_ID" "$LEVEL" "$MODE"
+bash "$SCRIPT_DIR/setup-crons-hybrid.sh" "$AGENT_ID" "$LEVEL" "script"
 
 # ========== 步骤 5: 完成 ==========
 echo ""

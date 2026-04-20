@@ -1,189 +1,170 @@
 #!/bin/bash
-# Evo-Cortex Hybrid Cron Setup Script
-# 支持两种执行模式：
-# - LLM 模式：通过 agent 智能执行（灵活但慢）
-# - Script 模式：直接运行脚本（快速但固定）
-#
-# 用法:
-#   bash setup-crons-hybrid.sh <agent-id> [basic|standard|full] [llm|script]
+# Evo-Cortex Cron 配置脚本
+# 参考 demo100-agent/install.sh 结构
 
 set -e
 
-AGENT_ID="${1:-main}"
+AGENT_NAME="${1:-}"
 LEVEL="${2:-standard}"
-MODE="${3:-script}"  # 默认使用 script 模式
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RUNNER_SCRIPT="$SCRIPT_DIR/evolution-runner.ts"
+EVO_CORTEX_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-echo "🧬 Evo-Cortex Hybrid Cron 配置工具"
-echo "Agent: $AGENT_ID"
-echo "配置级别：$LEVEL"
-echo "执行模式：$MODE"
-echo "---"
-
-# 检查是否已存在相同的任务
-check_existing() {
-    local name=$1
-    if openclaw cron list 2>/dev/null | grep -q "$name-$AGENT_ID"; then
-        echo "⚠️  任务 '$name' 已存在，跳过"
-        return 0
-    else
-        return 1
-    fi
-}
-
-# 添加定时任务（LLM 模式）
-add_cron_llm() {
-    local name=$1
-    local cron_expr=$2
-    local message=$3
-    
-    if check_existing "$name"; then
-        return 0
-    fi
-    
-    echo "✅ [LLM] 创建任务：$name"
-    
-    openclaw cron add \
-        --name "$name-$AGENT_ID" \
-        --agent "$AGENT_ID" \
-        --cron "$cron_expr" \
-        --message "$message" \
-        --session isolated \
-        --description "Evo-Cortex (LLM): $name" \
-        2>/dev/null
-}
-
-# 添加定时任务（Script 模式）
-add_cron_script() {
-    local name=$1
-    local cron_expr=$2
-    local task_type=$3
-    
-    if check_existing "$name"; then
-        return 0
-    fi
-    
-    echo "✅ [Script] 创建任务：$name"
-    
-    # 使用 system event 触发脚本执行
-    openclaw cron add \
-        --name "$name-$AGENT_ID" \
-        --agent "$AGENT_ID" \
-        --cron "$cron_expr" \
-        --system-event "EXECUTE_SCRIPT:$RUNNER_SCRIPT:$task_type:$AGENT_ID" \
-        --sessionTarget main \
-        --description "Evo-Cortex (Script): $name" \
-        2>/dev/null
-}
-
-# 根据模式选择添加方式
-add_task() {
-    local name=$1
-    local cron_expr=$2
-    local message=$3
-    local task_type=$4
-    
-    if [ "$MODE" = "llm" ]; then
-        add_cron_llm "$name" "$cron_expr" "$message"
-    else
-        add_cron_script "$name" "$cron_expr" "$task_type"
-    fi
-}
-
-# ========== 核心任务 ==========
-add_core_tasks() {
-    echo ""
-    echo "📋 配置核心任务..."
-    
-    add_task "hourly-fractal" "0 * * * *" \
-        "请运行分形思考，分析对话模式，生成元规则" \
-        "hourly-fractal"
-    
-    add_task "daily-review" "0 9 * * *" \
-        "请审查知识图谱，优化知识结构" \
-        "daily-review"
-    
-    add_task "active-learning" "0 4 * * *" \
-        "请检测学习机会，识别知识缺口" \
-        "active-learning"
-}
-
-# ========== 增强任务 ==========
-add_enhanced_tasks() {
-    echo ""
-    echo "📋 配置增强任务..."
-    
-    add_task "daily-compress" "0 9:30 * * *" \
-        "请压缩昨天的记忆，生成摘要" \
-        "daily-compress"
-    
-    add_task "weekly-compress" "0 3 * * 0" \
-        "请压缩本周的记忆，生成摘要" \
-        "weekly-compress"
-    
-    add_task "weekly-kg-expansion" "0 5 * * 0" \
-        "请扩展知识图谱" \
-        "weekly-kg-expansion"
-    
-    add_task "monthly-cycle" "0 2 1 * *" \
-        "请执行月度进化周期" \
-        "monthly-cycle"
-}
-
-# ========== 高级任务 ==========
-add_advanced_tasks() {
-    echo ""
-    echo "📋 配置高级任务..."
-    
-    add_task "nightly-evolution" "0 23 * * *" \
-        "请进行每日进化总结" \
-        "nightly-evolution"
-    
-    add_task "session-scan" "0 */2 * * *" \
-        "请扫描最近的会话" \
-        "session-scan"
-}
-
-# ========== 主流程 ==========
-case "$LEVEL" in
-    basic)
-        add_core_tasks
-        ;;
-    standard)
-        add_core_tasks
-        add_enhanced_tasks
-        ;;
-    full)
-        add_core_tasks
-        add_enhanced_tasks
-        add_advanced_tasks
-        ;;
-    *)
-        echo "❌ 错误：未知的配置级别 '$LEVEL'"
-        exit 1
-        ;;
-esac
-
-echo ""
-echo "✅ 配置完成！"
-echo ""
-echo "📊 配置摘要:"
-echo "  执行模式：$MODE"
-if [ "$MODE" = "llm" ]; then
-    echo "  • 优点：灵活智能，可应对复杂情况"
-    echo "  • 缺点：每次调用 LLM，成本较高，速度较慢"
-else
-    echo "  • 优点：快速高效，无 LLM 成本，结果一致"
-    echo "  • 缺点：灵活性较低，依赖预定义逻辑"
+if [ -z "$AGENT_NAME" ]; then
+  echo "❌ 错误：请指定 Agent 名称"
+  echo "用法：$0 <agent-name> [basic|standard|full]"
+  exit 1
 fi
+
+echo "╔════════════════════════════════════════════════════════╗"
+echo "║  🧬 Evo-Cortex Cron 配置                                 ║"
+echo "╚════════════════════════════════════════════════════════╝"
 echo ""
-echo "查看任务列表:"
-echo "  openclaw cron list | grep $AGENT_ID"
+echo "📦 Agent: $AGENT_NAME"
+echo "📁 Workspace: $HOME/.openclaw/workspace-$AGENT_NAME"
+echo "📊 Level: $LEVEL"
 echo ""
-echo "切换模式:"
-echo "  # 先删除现有任务"
-echo "  openclaw cron remove <task-id>"
-echo "  # 然后用另一种模式重新配置"
-echo "  bash $0 $AGENT_ID $LEVEL llm"
+
+# 注册到 OpenClaw
+if ! openclaw agents list 2>/dev/null | grep -q "^$AGENT_NAME"; then
+  echo "📝 注册 Agent 到 OpenClaw..."
+  openclaw agents add "$AGENT_NAME" --workspace "$HOME/.openclaw/workspace-$AGENT_NAME" --non-interactive >/dev/null 2>&1 && echo "   ✅ 完成" || echo "   ⚠️ 失败"
+  echo ""
+fi
+
+# 清理旧任务
+echo "🧹 清理旧的 Cron 任务..."
+openclaw cron list --json 2>/dev/null | jq -r ".[] | select(.agentId == \"$AGENT_NAME\") | .id" 2>/dev/null | while read job_id; do
+  [ -n "$job_id" ] && openclaw cron remove "$job_id" >/dev/null 2>&1 && echo "   ✅ 已删除 $job_id" || true
+done
+echo "   ✅ 完成"
+echo ""
+
+# 核心任务
+echo "📋 配置核心任务..."
+
+# 1. hourly-fractal (每小时)
+echo "   - hourly-fractal (每小时)..."
+openclaw cron add \
+  --cron "0 * * * *" \
+  --agent "$AGENT_NAME" \
+  --message "请运行分形思考，分析对话模式，生成元规则" \
+  --name "$AGENT_NAME-fractal-thinking" \
+  --no-deliver \
+  --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+
+# 2. daily-review (每天 09:00)
+echo "   - daily-review (每天 09:00)..."
+openclaw cron add \
+  --cron "0 9 * * *" \
+  --agent "$AGENT_NAME" \
+  --message "请审查知识图谱，优化知识结构" \
+  --name "$AGENT_NAME-daily-review" \
+  --no-deliver \
+  --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+
+# 3. active-learning (每天 04:00)
+echo "   - active-learning (每天 04:00)..."
+openclaw cron add \
+  --cron "0 4 * * *" \
+  --agent "$AGENT_NAME" \
+  --message "请检测学习机会，识别知识缺口" \
+  --name "$AGENT_NAME-active-learning" \
+  --no-deliver \
+  --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+
+# 根据级别配置更多任务
+if [ "$LEVEL" = "standard" ] || [ "$LEVEL" = "full" ]; then
+  echo ""
+  echo "📋 配置增强任务 (standard)..."
+  
+  # 4. daily-compress (每天 09:30)
+  echo "   - daily-compress (每天 09:30)..."
+  openclaw cron add \
+    --cron "0 9:30 * * *" \
+    --agent "$AGENT_NAME" \
+    --message "请压缩昨天的记忆，生成摘要" \
+    --name "$AGENT_NAME-daily-compress" \
+    --no-deliver \
+    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+  
+  # 5. weekly-compress (每周日 03:00)
+  echo "   - weekly-compress (每周日 03:00)..."
+  openclaw cron add \
+    --cron "0 3 * * 0" \
+    --agent "$AGENT_NAME" \
+    --message "请压缩本周的记忆，生成摘要" \
+    --name "$AGENT_NAME-weekly-compress" \
+    --no-deliver \
+    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+  
+  # 6. weekly-kg-expansion (每周日 05:00)
+  echo "   - weekly-kg-expansion (每周日 05:00)..."
+  openclaw cron add \
+    --cron "0 5 * * 0" \
+    --agent "$AGENT_NAME" \
+    --message "请扩展知识图谱，发现新关联" \
+    --name "$AGENT_NAME-kg-expansion" \
+    --no-deliver \
+    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+  
+  # 7. monthly-cycle (每月 1 号 02:00)
+  echo "   - monthly-cycle (每月 1 号 02:00)..."
+  openclaw cron add \
+    --cron "0 2 1 * *" \
+    --agent "$AGENT_NAME" \
+    --message "请执行月度进化周期，审查并优化" \
+    --name "$AGENT_NAME-monthly-cycle" \
+    --no-deliver \
+    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+fi
+
+if [ "$LEVEL" = "full" ]; then
+  echo ""
+  echo "📋 配置高级任务 (full)..."
+  
+  # 8. session-scan (每 30 分钟)
+  echo "   - session-scan (每 30 分钟)..."
+  openclaw cron add \
+    --cron "*/30 * * * *" \
+    --agent "$AGENT_NAME" \
+    --message "请扫描最近会话，提取关键记忆" \
+    --name "$AGENT_NAME-session-scan" \
+    --no-deliver \
+    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+  
+  # 9. realtime-index (每 5 分钟)
+  echo "   - realtime-index (每 5 分钟)..."
+  openclaw cron add \
+    --cron "*/5 * * * *" \
+    --agent "$AGENT_NAME" \
+    --message "请更新搜索索引" \
+    --name "$AGENT_NAME-realtime-index" \
+    --no-deliver \
+    --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
+fi
+
+echo ""
+echo "╔════════════════════════════════════════════════════════╗"
+echo "║  ✅ Evo-Cortex 配置完成！                                 ║"
+echo "╚════════════════════════════════════════════════════════╝"
+echo ""
+
+# 统计
+echo "📊 当前任务列表:"
+openclaw cron list 2>/dev/null | grep "$AGENT_NAME" | grep -E "fractal|review|learning|compress|expansion|cycle|scan|index" | while read line; do
+  TASK_NAME=$(echo "$line" | awk '{print $2}')
+  SCHEDULE=$(echo "$line" | awk '{print $4, $5, $6, $7}')
+  echo "   ✅ $TASK_NAME | $SCHEDULE"
+done
+
+TOTAL=$(openclaw cron list --json 2>/dev/null | jq -r "[.[] | select(.agentId == \"$AGENT_NAME\")] | length" 2>/dev/null || echo "0")
+echo ""
+echo "✅ 总计：$TOTAL 个任务"
+echo ""
+echo "💡 提示:"
+echo "   查看所有任务：openclaw cron list | grep $AGENT_NAME"
+echo "   手动触发：openclaw cron run <task-id>"
+echo "   删除任务：openclaw cron remove <task-id>"
+echo ""
+
+exit 0
