@@ -4,8 +4,12 @@
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/luoboask/evo-cortex)
 [![npm](https://img.shields.io/npm/v/@evo-agents/evo-cortex.svg)](https://www.npmjs.com/package/@evo-agents/evo-cortex)
+[![npm downloads](https://img.shields.io/npm/dm/@evo-agents/evo-cortex.svg)](https://www.npmtrends.com/@evo-agents/evo-cortex)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/luoboask/evo-cortex/blob/main/LICENSE)
 [![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.3.13+-orange.svg)](https://github.com/openclaw/openclaw)
+[![GitHub stars](https://img.shields.io/github/stars/luoboask/evo-cortex?style=social)](https://github.com/luoboask/evo-cortex/stargazers)
+[![GitHub issues](https://img.shields.io/github/issues/luoboask/evo-cortex)](https://github.com/luoboask/evo-cortex/issues)
+[![CI/CD](https://github.com/luoboask/evo-cortex/actions/workflows/ci.yml/badge.svg)](https://github.com/luoboask/evo-cortex/actions)
 
 ---
 
