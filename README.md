@@ -72,13 +72,13 @@ openclaw plugins install @evo-agents/evo-cortex
 
 ## ⚙️ 配置选项
 
-### 3 级配置（按需求选择）
+### 3 级配置（已简化为默认 Full）
 
 | 级别 | 任务数 | 适用场景 | 推荐度 |
 |------|--------|----------|--------|
-| **basic** | 3 个 | 初次尝试、资源有限 | ⭐⭐⭐ |
-| **standard** | 7 个 | 日常使用（推荐） | ⭐⭐⭐⭐⭐ |
-| **full** | 9 个 | 高频专业场景 | ⭐⭐⭐⭐ |
+| **full** | 9 个 | 所有场景（默认） | ⭐⭐⭐⭐⭐ |
+
+> 💡 **2026-04-20 更新**: 简化安装流程，移除 basic/standard 选择，默认启用全部 9 个任务。因为 session-scan 等核心任务对记忆集成至关重要，不应该被禁用。
 
 ### 2 种执行模式
 
@@ -91,13 +91,11 @@ openclaw plugins install @evo-agents/evo-cortex
 ### 配置命令
 
 ```bash
-# 标准配置 + Script 模式（推荐）
-bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons-hybrid.sh \
-  <agent-id> standard script
+# 一键配置（推荐 - 默认 Full 级别）
+~/.openclaw/extensions/evo-cortex/scripts/quick-setup.sh <your-agent-id>
 
-# 完整配置 + LLM 模式
-bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons-hybrid.sh \
-  <agent-id> full llm
+# 或手动配置
+bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons-hybrid.sh <agent-id>
 
 # 多 Agent 批量配置
 ~/.openclaw/extensions/evo-cortex/scripts/install-for-all-agents.sh
@@ -114,6 +112,7 @@ bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons-hybrid.sh \
 | `hourly-fractal` | 每小时 | 生成元规则 | `meta-rules-*.md` |
 | `daily-review` | 每天 9AM | 审查知识图谱 | `daily-review-*.md` |
 | `active-learning` | 每天 4AM | 检测学习机会 | `active-learning-*.md` |
+| `session-scan` | 每 30 分钟 | 扫描会话提取记忆 | 追加到 `memory/*.md` |
 
 ### 增强任务（MEDIUM 优先级）🔶
 
@@ -121,25 +120,28 @@ bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons-hybrid.sh \
 |------|------|------|------|
 | `daily-compress` | 每天 9:30AM | 日记忆压缩 | `compress-daily-*.md` |
 | `weekly-compress` | 周日 3AM | 周记忆压缩 | `compress-weekly-*.md` |
-| `weekly-kg-expansion` | 周日 5AM | 知识扩展 | 更新 `entities.json` |
+| `weekly-kg-expansion` | 周日 5AM | 知识扩展（不依赖外部服务） | 更新 `entities.json` |
 | `monthly-cycle` | 每月 1 号 2AM | 月度整合 | `monthly-report-*.md` |
 
 ### 高级任务（LOW 优先级）🔷
 
 | 任务 | 频率 | 作用 |
 |------|------|------|
-| `nightly-evolution` | 每天 11PM | 夜间总结 |
-| `session-scan` | 每 2 小时 | 会话扫描 |
+| `realtime-index` | 每 5 分钟 | 实时更新搜索索引 |
 
 ---
 
 ## 🛠️ 核心工具
 
-Evo-Cortex 提供 6 个强大工具：
+Evo-Cortex 提供 6 个强大工具（通过工厂函数模式自动适配当前 Agent）：
 
 ### 1. search_memory - 搜索记忆
 ```bash
+# 在聊天中直接使用
 openclaw memory search "关键词" --agent <agent-id>
+
+# 或在对话中自然使用
+"帮我搜索一下之前关于定时任务的讨论"
 ```
 
 ### 2. search_knowledge - 检索知识
@@ -155,7 +157,11 @@ openclaw memory search "关键词" --agent <agent-id>
 
 ### 3. manage_index - 管理索引
 ```bash
+# 查看索引状态
 openclaw memory status --agent <agent-id>
+
+# 重建索引
+openclaw memory index --agent <agent-id> --force
 ```
 
 ### 4. scan_sessions - 扫描会话
@@ -163,17 +169,19 @@ openclaw memory status --agent <agent-id>
 {
   "name": "scan_sessions",
   "arguments": {
-    "full": false
+    "full": false,
+    "limit": 5
   }
 }
 ```
 
-### 5. crawl_web - 抓取网页
+### 5. crawl_web - 抓取网页（可选）
 ```json
 {
   "name": "crawl_web",
   "arguments": {
-    "url": "https://docs.openclaw.ai"
+    "url": "https://docs.openclaw.ai",
+    "extractMode": "markdown"
   }
 }
 ```
@@ -183,10 +191,13 @@ openclaw memory status --agent <agent-id>
 {
   "name": "health_check",
   "arguments": {
-    "format": "text"
+    "format": "text",
+    "verbose": true
   }
 }
 ```
+
+> 💡 **提示**: 所有工具会自动识别当前 Agent，无需手动指定 `agent_name` 参数（已废弃）。
 
 ---
 
@@ -226,17 +237,18 @@ openclaw memory status --agent <agent-id>
 ```
 evo-cortex/
 ├── src/
-│   ├── index.ts                    # 主入口（工厂函数模式）
+│   ├── index.ts                    # 主入口（工厂函数模式，支持多 Agent）
 │   ├── cli/commands.ts             # CLI 命令实现
 │   ├── tools/
 │   │   └── health-check.ts         # 健康检查工具
 │   ├── memory/                     # 记忆系统
 │   │   ├── memory_hub.ts           # 记忆中心
-│   │   ├── memory_indexer.ts       # 索引器
-│   │   └── session_scanner.ts      # 会话扫描
+│   │   ├── memory_indexer.ts       # SQLite 索引器
+│   │   └── session_scanner.ts      # 会话扫描（每 30 分钟）
 │   ├── knowledge/                  # 知识系统
-│   │   ├── knowledge_graph.ts      # 知识图谱
-│   │   └── web_crawler.ts          # 网页爬取
+│   │   ├── knowledge_graph.ts      # 知识图谱（不依赖外部服务）
+│   │   ├── web_crawler.ts          # 网页爬取
+│   │   └── quality_scorer.ts       # 质量评分
 │   ├── evolution/                  # 进化系统
 │   │   └── scheduler.ts            # 进化调度器
 │   ├── hooks/                      # 钩子系统
@@ -245,14 +257,21 @@ evo-cortex/
 │       ├── logger.ts               # 统一日志
 │       ├── cache.ts                # TTL 缓存
 │       ├── config-validator.ts     # 配置验证
-│       ├── plugin-context.ts       # 上下文管理
+│       ├── plugin-context.ts       # 上下文管理（动态路径）
 │       └── cron-auto-setup.ts      # 自动配置提示
 ├── scripts/                        # 自动化脚本
-│   ├── quick-setup.sh              # 一键配置向导
-│   ├── verify-setup.sh             # 配置验证
-│   ├── setup-crons-hybrid.sh       # 混合模式配置
-│   ├── install-for-all-agents.sh   # 多 Agent 批量配置
-│   └── evolution-runner.ts         # Script 执行引擎
+│   ├── quick-setup.sh              # 一键配置向导（默认 Full）
+│   ├── setup-crons-hybrid.sh       # Cron 配置（9 个任务）
+│   ├── install.sh                  # 交互式安装
+│   ├── register-agent.sh           # Agent 注册
+│   ├── cleanup-plugin-demo.sh      # 清理测试任务
+│   ├── list-all-crons.sh           # 列出所有任务
+│   ├── list-agent-crons.sh         # 列出指定 Agent 任务
+│   ├── list-crons-simple.sh        # 简化列表输出
+│   └── show-full-crons.sh          # 显示完整任务详情
+├── tests/                          # 测试套件
+│   ├── memory.test.ts              # 记忆系统测试
+│   └── knowledge.test.ts           # 知识系统测试
 ├── README.md                       # 本文档
 └── package.json
 ```
@@ -269,8 +288,8 @@ openclaw cron list | grep <agent>
 # 查看日志
 openclaw logs --follow | grep evolution
 
-# 重新配置
-bash setup-crons-hybrid.sh <agent> basic script
+# 重新配置（一键）
+~/.openclaw/extensions/evo-cortex/scripts/quick-setup.sh <agent-id>
 ```
 
 ### 搜索不到记忆
@@ -278,18 +297,26 @@ bash setup-crons-hybrid.sh <agent> basic script
 # 重建索引
 openclaw memory index --agent <agent> --force
 
-# 扫描会话
-openclaw agent --message "扫描最近会话"
+# 手动扫描会话
+openclaw agent --message "扫描最近会话并提取记忆"
+```
+
+### kg-expansion 提示需要 Token
+```bash
+# ✅ 已修复：kg-expansion 现在不依赖外部服务
+# 如果仍看到此提示，说明是旧任务，请重新运行：
+
+~/.openclaw/extensions/evo-cortex/scripts/quick-setup.sh <agent-id>
 ```
 
 ### Script 模式失败
 ```bash
 # 手动测试脚本
-npx tsx ~/.openclaw/extensions/evo-cortex/scripts/evolution-runner.ts \
+npx tsx ~/.openclaw/extensions/evo-cortex/src/evolution/scheduler.ts \
   hourly-fractal <agent>
 
-# 临时切换 LLM 模式
-bash setup-crons-hybrid.sh <agent> standard llm
+# 临时切换到纯 LLM 模式（不推荐）
+# 需要手动修改 cron 任务，建议使用 hybrid 模式
 ```
 
 ---
@@ -305,11 +332,10 @@ bash setup-crons-hybrid.sh <agent> standard llm
 
 ## 💡 最佳实践
 
-### 1. 渐进式部署
-```
-Week 1: basic + script → 熟悉功能
-Week 2: standard + script → 完整体验
-Week 3: 评估效果 → 决定是否升级
+### 1. 一键部署（推荐）
+```bash
+# 默认 Full 配置，包含所有核心功能
+~/.openclaw/extensions/evo-cortex/scripts/quick-setup.sh <your-agent-id>
 ```
 
 ### 2. 定期回顾
@@ -319,12 +345,27 @@ cat ~/.openclaw/workspace-<agent>/evolution/<agent>/meta-rules-*.md | tail -50
 
 # 每月清理过时内容
 find ~/.openclaw/workspace-<agent>/evolution/ -mtime +90 -delete
+
+# 检查知识图谱健康度
+bash ~/.openclaw/extensions/evo-cortex/scripts/knowledge-health-check.sh <agent>
 ```
 
 ### 3. 团队协作
 - 统一配置级别便于交流
 - 定期分享元规则洞察
 - 建立共享知识库
+
+### 4. 监控与优化
+```bash
+# 查看所有任务状态
+~/.openclaw/extensions/evo-cortex/scripts/list-all-crons.sh
+
+# 查看指定 Agent 的任务
+~/.openclaw/extensions/evo-cortex/scripts/list-agent-crons.sh <agent>
+
+# 简化输出（适合脚本调用）
+~/.openclaw/extensions/evo-cortex/scripts/list-crons-simple.sh
+```
 
 ---
 
@@ -395,11 +436,47 @@ git push origin feature/your-feature
 
 - **总代码行数**: 3000+
 - **文档总行数**: 2000+
-- **核心工具**: 6 个
-- **定时任务**: 9 个
-- **自动化脚本**: 5 个
-- **成本节省**: 78%
-- **速度提升**: 98%
+- **核心工具**: 6 个（工厂函数模式，支持多 Agent）
+- **定时任务**: 9 个（Full 配置）
+- **自动化脚本**: 9 个
+- **成本节省**: 78%（混合执行模式）
+- **速度提升**: 98%（Script 部分 <1s）
+
+---
+
+## 🔄 最近更新
+
+### 2026-04-20
+
+**✨ 重大改进**:
+
+1. **简化安装流程** (`589a460`)
+   - 移除 basic/standard/full 选择
+   - 默认启用全部 9 个任务
+   - 因为 session-scan 等核心任务对记忆集成至关重要
+
+2. **kg-expansion 不依赖外部服务** (`52f28e9`)
+   - 修改任务指令，基于已有记忆和知识推理
+   - 不再需要语雀 Token
+   - 完全独立运行
+
+3. **移除硬编码路径** (`e52a012`)
+   - 使用动态路径解析（从运行时上下文获取）
+   - 支持多 Agent 共享插件实例
+   - 统一到 workspace 目录结构
+
+4. **完善工具链** (`32ab912`, `4d115e1`)
+   - 参考 demo100-agent 重写 Cron 配置脚本
+   - 添加 9 个辅助脚本（清理、列表、验证等）
+   - 自动 Agent 注册和旧任务清理
+
+**📦 新增脚本**:
+- `cleanup-plugin-demo.sh` - 清理测试残留任务
+- `list-all-crons.sh` - 列出所有任务（解决输出截断）
+- `list-agent-crons.sh` - 列出指定 Agent 任务
+- `list-crons-simple.sh` - 简化列表输出
+- `show-full-crons.sh` - 显示完整任务详情
+- `knowledge-health-check.sh` - 知识图谱健康检查
 
 ---
 
@@ -432,6 +509,6 @@ MIT License - 详见 [LICENSE](LICENSE) 文件
 
 ---
 
-**最后更新**: 2026-04-20  
+**最后更新**: 2026-04-20（重大更新）  
 **版本**: 1.0.0  
 **维护者**: Evo-Agents Team
