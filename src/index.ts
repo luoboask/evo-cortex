@@ -475,3 +475,14 @@ const plugin = {
 };
 
 export default plugin;
+
+// ========== 类型导出（供其他插件复用）==========
+export * from './utils/errors';
+export * from './utils/performance';
+export * from './utils/logger';
+export * from './utils/cache';
+export * from './utils/config-validator';
+export * from './utils/plugin-context';
+export * from './memory/memory_hub';
+export * from './knowledge/knowledge_graph';
+export * from './evolution/scheduler';

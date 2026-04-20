@@ -35,7 +35,9 @@
     "node": ">=18.0.0"
   },
   "openclaw": {
-    "extensions": ["./src/index.ts"],
+    "extensions": [
+      "./src/index.ts"
+    ],
     "compat": {
       "pluginApi": ">=2026.3.24-beta.2",
       "minGatewayVersion": "2026.3.24-beta.2"
@@ -58,5 +60,9 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"scripts/**/*.ts\"",
     "perf:report": "tsx scripts/generate-perf-report.ts",
     "prepublishOnly": "npm test && npm run lint"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "typescript": "^6.0.3"
   }
 }
