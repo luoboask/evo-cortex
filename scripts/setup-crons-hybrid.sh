@@ -100,7 +100,7 @@ echo "   - weekly-kg-expansion (每周日 05:00)..."
 openclaw cron add \
   --cron "0 5 * * 0" \
   --agent "$AGENT_NAME" \
-  --message "请扩展知识图谱，发现新关联" \
+  --message "请扩展知识图谱：1) 从最近记忆中提取新实体和概念 2) 发现实体间的潜在关联 3) 识别知识缺口 4) 更新 entities.json。无需外部服务，仅基于已有记忆和知识进行推理。" \
   --name "$AGENT_NAME-kg-expansion" \
   --no-deliver \
   --session isolated >/dev/null 2>&1 && echo "      ✅ 完成" || echo "      ⚠️ 失败"
