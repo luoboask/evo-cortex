@@ -1,93 +1,78 @@
 # 🧬 Evo-Cortex
 
-**Give Your Agent a Brain**
+> **Give Your Agent a Brain** — Persistent memory, continuous learning, and evolutionary capabilities for OpenClaw agents.
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/luoboask/evo-cortex)
-[![npm](https://img.shields.io/npm/v/@evo-agents/evo-cortex.svg)](https://www.npmjs.com/package/@evo-agents/evo-cortex)
-[![npm downloads](https://img.shields.io/npm/dm/@evo-agents/evo-cortex.svg)](https://www.npmtrends.com/@evo-agents/evo-cortex)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://github.com/luoboask/evo-cortex/blob/main/LICENSE)
-[![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.3.13+-orange.svg)](https://github.com/openclaw/openclaw)
-[![GitHub stars](https://img.shields.io/github/stars/luoboask/evo-cortex?style=social)](https://github.com/luoboask/evo-cortex/stargazers)
+[![Version](https://img.shields.io/npm/v/@evo-agents/evo-cortex?color=blue&logo=npm)](https://www.npmjs.com/package/@evo-agents/evo-cortex)
+[![npm downloads](https://img.shields.io/npm/dm/@evo-agents/evo-cortex?logo=npm)](https://www.npmtrends.com/@evo-agents/evo-cortex)
+[![License](https://img.shields.io/npm/l/@evo-agents/evo-cortex?color=green)](./LICENSE)
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.3.13+-orange?logo=openclaw)](https://github.com/openclaw/openclaw)
 [![CI/CD](https://github.com/luoboask/evo-cortex/actions/workflows/ci.yml/badge.svg)](https://github.com/luoboask/evo-cortex/actions)
+[![GitHub stars](https://img.shields.io/github/stars/luoboask/evo-cortex?style=social)](https://github.com/luoboask/evo-cortex/stargazers)
 
-**[🇨🇳 中文文档](./README.zh.md)**
+**[🇨🇳 中文文档](./README.zh.md)** • **[📚 Full Documentation](./docs/)** • **[🚀 Quick Start](#-quick-start)**
 
 ---
 
-## 🎯 Overview
+## 🎯 What is Evo-Cortex?
 
-Evo-Cortex is not just another plugin—it's a **complete brain system** for OpenClaw agents. It transforms AI agents from passive responders into active learners with persistent memory, continuous learning, and evolutionary capabilities. Watch your agent get smarter with every interaction!
+Evo-Cortex transforms AI agents from **passive responders** into **active learners**. It provides a complete brain system with persistent memory, experience distillation, knowledge graphs, and automated evolution cycles.
 
-### ✨ Core Value
+### Why Evo-Cortex?
 
-| Capability | Description | Impact |
-|------------|-------------|--------|
-| **🧠 Persistent Memory** | SQLite-based semantic memory with automatic indexing | No more "goldfish memory" |
-| **📚 Experience Distillation** | Auto-extract meta-rules from repeated patterns | Continuous wisdom accumulation |
-| **🗂️ Knowledge Graph** | Automatic entity extraction and relationship mapping | Structured knowledge base |
-| **🧬 Evolution Scheduler** | 9 specialized tasks for continuous improvement | Self-improving agent |
+| Problem | Solution | Impact |
+|---------|----------|--------|
+| ❌ Agents forget everything after each session | ✅ **Persistent Memory** with semantic search | Remember context across all sessions |
+| ❌ No learning from repeated experiences | ✅ **Experience Distillation** extracts meta-rules | Get wiser over time |
+| ❌ Unstructured knowledge | ✅ **Knowledge Graph** auto-builds relationships | Structured wisdom accumulation |
+| ❌ Static capabilities | ✅ **Evolution Scheduler** runs 9 improvement tasks | Continuous self-improvement |
+
+### Key Results
+
+```
+💰 Cost Reduction:     78% ↓  (Hybrid Script+LLM execution)
+⚡ Speed Improvement:  98% ↑  (<1s for 95% of tasks)
+🧠 Memory Recall:      New    (<100ms semantic search)
+📈 Learning Rate:      ∞      (Continuous evolution)
+```
 
 ---
 
 ## 🚀 Quick Start
 
-### Installation
-
-**Method 1: npm (Recommended)**
+### 1. Install
 
 ```bash
-# Install plugin
+# Via npm (Recommended)
 openclaw plugins install @evo-agents/evo-cortex
-
-# One-click setup (Full configuration)
-~/.openclaw/extensions/evo-cortex/scripts/quick-setup.sh <your-agent-id>
-
-# Verify setup
-~/.openclaw/extensions/evo-cortex/scripts/verify-setup.sh <your-agent-id>
 ```
 
-**Method 2: Local (Development)**
+### 2. Setup
 
 ```bash
-# Clone repository
-git clone https://github.com/luoboask/evo-cortex.git
-cd evo-cortex
-
-# Install locally
-openclaw plugins install ~/.openclaw/extensions/evo-cortex
-
-# Setup
+# One-click configuration (Full mode)
 ~/.openclaw/extensions/evo-cortex/scripts/quick-setup.sh <your-agent-id>
 ```
 
-### Verification
+### 3. Verify
 
 ```bash
-# Check plugin status
+# Check installation
 openclaw plugins list | grep evo-cortex
 
-# List cron tasks
+# View active tasks
 ~/.openclaw/extensions/evo-cortex/scripts/list-agent-crons.sh <your-agent-id>
-
-# View health status
-~/.openclaw/extensions/evo-cortex/scripts/verify-setup.sh <your-agent-id>
 ```
+
+**That's it!** Your agent now has a brain. 🧠
 
 ---
 
-## 🧠 Features
+## ✨ Core Features
 
-### 1. Persistent Memory System
+### 🧠 Persistent Memory
 
-Never lose context again. Evo-Cortex automatically captures, indexes, and retrieves memories across all sessions using SQLite-based semantic search.
+SQLite-based semantic memory that automatically captures and retrieves context across all sessions.
 
-**Key Capabilities:**
-- 🔄 Real-time memory updates (every 5 min)
-- 🔍 Semantic search with embeddings
-- 💾 Efficient SQLite indexing
-- 📊 Automatic session scanning (every 30 min)
-
-**Example:**
 ```typescript
 // Search memory semantically
 const results = await search_memory({
@@ -95,41 +80,33 @@ const results = await search_memory({
   limit: 5,
   minScore: 0.4
 });
+// Returns relevant memories in <100ms
 ```
 
----
+**Highlights:**
+- Real-time updates (every 5 min)
+- Automatic session scanning (every 30 min)
+- Semantic search with embeddings
+- Zero configuration required
 
-### 2. Experience Distillation
+### 📚 Experience Distillation
 
-Transform repeated experiences into actionable meta-rules and best practices. Your agent learns from patterns and becomes wiser over time.
+Automatically extract meta-rules and best practices from repeated patterns.
 
-**Process:**
-```
-Experience → Pattern Recognition → Meta-Rule → Best Practice
-```
-
-**Example Meta-Rule:**
+**Example Output:**
 ```markdown
 ## Rule: Dynamic Path Resolution
-- **Trigger**: When configuring paths in scripts
-- **Action**: Use dynamic resolution instead of hardcoding
-- **Benefit**: Portability across environments
-- **Confidence**: 98% (observed 15 times)
+**When**: Configuring paths in scripts  
+**Do**: Use dynamic resolution instead of hardcoding  
+**Why**: Portability across environments  
+**Confidence**: 98% (observed 15 times)
 ```
 
----
+### 🗂️ Knowledge Graph
 
-### 3. Knowledge Graph
+Build and visualize structured knowledge from your interactions.
 
-Automatically build and maintain a structured knowledge graph from your interactions. Visualize relationships between concepts, entities, and lessons learned.
-
-**Features:**
-- 🕸️ Auto entity extraction
-- 🔗 Relationship mapping
-- 📈 Health monitoring
-- 🎨 Mermaid visualizations
-
-**Stats:**
+**Auto-generated Stats:**
 ```json
 {
   "entities": 12,
@@ -140,74 +117,38 @@ Automatically build and maintain a structured knowledge graph from your interact
 }
 ```
 
----
+### 🧬 Evolution Scheduler
 
-### 4. Evolution Scheduler
+Nine automated tasks ensure continuous improvement:
 
-Nine specialized cron tasks work together to ensure continuous improvement. From hourly fractal analysis to monthly evolution cycles, your agent never stops learning.
+| Frequency | Task | Purpose |
+|-----------|------|---------|
+| Every hour | `hourly-fractal` | Fractal thinking analysis |
+| Every 30 min | `session-scan` | Memory scanning |
+| Every 5 min | `realtime-index` | Memory updates |
+| Daily 09:00 | `daily-review` | Memory review |
+| Daily 04:00 | `active-learning` | Gap detection |
+| Weekly Sun | `weekly-compress` | Knowledge consolidation |
+| Monthly 1st | `monthly-cycle` | Evolution cycle |
 
-#### Configuration Levels
-
-| Level | Tasks | Frequency | Best For |
-|-------|-------|-----------|----------|
-| **Basic** | 3 | Hourly + Daily | Minimal overhead |
-| **Standard** | 7 | + Weekly + Monthly | Balanced approach |
-| **Full** ⭐ | 9 | + Real-time | Maximum intelligence |
-
-#### Task Schedule
-
-| Task | Frequency | Time | Description |
-|------|-----------|------|-------------|
-| 🌀 `hourly-fractal` | Every hour | :00 | Fractal thinking analysis |
-| 📝 `daily-review` | Daily | 09:00 | Daily memory review |
-| 🎯 `active-learning` | Daily | 04:00 | Knowledge gap detection |
-| 🗜️ `daily-compress` | Daily | 09:30 | Memory compression |
-| 📦 `weekly-compress` | Weekly | Sun 03:00 | Weekly consolidation |
-| 🌐 `weekly-kg-expansion` | Weekly | Sun 05:00 | Knowledge graph growth |
-| 🔄 `monthly-cycle` | Monthly | 1st 02:00 | Monthly evolution cycle |
-| 🔍 `session-scan` | Every 30 min | :00,:30 | Session memory scanning |
-| ⚡ `realtime-index` | Every 5 min | :00,:05 | Real-time memory updates |
-
----
-
-## 📊 Performance
-
-### Cost & Speed
-
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| **Cost per Task** | $0.05 | $0.011 | **78% ↓** |
-| **Response Time** | 5.2s | 0.1s | **98% ↑** |
-| **Memory Recall** | None | <100ms | **New** |
-| **Learning Rate** | 0% | Continuous | **∞** |
-
-### Hybrid Execution Model
-
-Evo-Cortex uses a hybrid Script+LLM execution model. Simple tasks run as fast scripts (<1s), while complex reasoning leverages LLM creativity.
-
-```
-Simple Tasks (95%) → Script Mode → <1s, $0.001
-Complex Tasks (5%)  → LLM Mode   → ~5s, $0.05
-                    ────────────────────────
-                    Average: 78% cost reduction
-```
+**Configuration Levels:**
+- **Basic** (3 tasks): Minimal overhead
+- **Standard** (7 tasks): Balanced approach
+- **Full** ⭐ (9 tasks): Maximum intelligence (default)
 
 ---
 
 ## 🛠️ Tools & API
 
-### Available Tools
+Three powerful tools available out of the box:
 
-| Tool | Description | Example |
-|------|-------------|---------|
+| Tool | Purpose | Example |
+|------|---------|---------|
 | `search_memory` | Semantic memory search | `search_memory({query: "...", limit: 5})` |
-| `search_knowledge` | Knowledge graph queries | `search_knowledge({entity: "cron", type: "system"})` |
-| `health_check` | System health monitoring | `health_check({agent: "my-agent"})` |
+| `search_knowledge` | Knowledge graph queries | `search_knowledge({entity: "cron"})` |
+| `health_check` | System monitoring | `health_check({agent: "my-agent"})` |
 
-### Factory Function Pattern
-
-Supports multiple agents with automatic context detection. No hardcoded agent names needed!
-
+**Factory Pattern Support:**
 ```typescript
 import { createEvoCortexTools } from '@evo-agents/evo-cortex';
 
@@ -220,137 +161,148 @@ const tools = createEvoCortexTools({ agentName: 'my-agent' });
 
 ---
 
-## 📦 Package Info
+## 📊 Performance
 
-### Distribution
+### Hybrid Execution Model
+
+Evo-Cortex intelligently routes tasks between fast scripts and creative LLM:
+
+```
+┌─────────────────────────────────────────────────────┐
+│ Simple Tasks (95%) → Script Mode → <1s, $0.001     │
+│ Complex Tasks (5%) → LLM Mode   → ~5s, $0.05       │
+├─────────────────────────────────────────────────────┤
+│ Result: 78% cost reduction, 98% speed improvement  │
+└─────────────────────────────────────────────────────┘
+```
+
+### Benchmarks
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Cost per task | $0.05 | $0.011 | ↓ 78% |
+| Response time | 5.2s | 0.1s | ↑ 98% |
+| Memory recall | None | <100ms | ✨ New |
+| Learning rate | 0% | Continuous | ∞ |
+
+---
+
+## 📦 Package Details
 
 | Property | Value |
 |----------|-------|
-| **Package Name** | `@evo-agents/evo-cortex` |
+| **Package** | `@evo-agents/evo-cortex` |
 | **Version** | 1.0.0 |
-| **License** | MIT |
 | **Size** | 64.6 KB (47 files) |
 | **Dependencies** | 0 (zero!) |
-| **Registry** | https://registry.npmjs.org |
+| **License** | MIT |
+| **Compatibility** | OpenClaw 2026.3.13+ |
 
-### Requirements
-
-| Requirement | Minimum | Recommended |
-|-------------|---------|-------------|
-| **Node.js** | v18+ | v20+ |
-| **OpenClaw** | 2026.3.13+ | Latest |
-| **Disk Space** | 100 MB | 500 MB |
-| **Memory** | 256 MB | 512 MB |
+**Requirements:**
+- Node.js v18+ (v20+ recommended)
+- OpenClaw 2026.3.13 or later
+- 100 MB disk space minimum
 
 ---
 
 ## 📚 Documentation
 
-| Document | Description |
+| Resource | Description |
 |----------|-------------|
-| [README](./README.md) | English documentation (you are here) |
-| [README.zh.md](./README.zh.md) | 中文文档 |
-| [CHANGELOG](./CHANGELOG.md) | Version history |
-| [ROADMAP](./ROADMAP.md) | Future plans |
-| [CONTRIBUTING](./CONTRIBUTING.md) | Contribution guide |
-| [SECURITY](./SECURITY.md) | Security policy |
-| [MEDIA](./MEDIA.md) | Press kit |
-| [MILESTONES](./MILESTONES.md) | Project milestones |
-| [LOGO](./LOGO.md) | Brand guidelines |
+| **[Quick Start](#-quick-start)** | Get started in 3 steps |
+| **[Features](#-core-features)** | Deep dive into capabilities |
+| **[API Reference](./docs/API.md)** | Complete tool documentation |
+| **[Configuration](./docs/CONFIG.md)** | Customize behavior |
+| **[Examples](./examples/)** | Real-world use cases |
+| **[FAQ](./docs/FAQ.md)** | Common questions |
 
----
-
-## 🔧 Scripts
-
-Evo-Cortex includes 16 automation scripts:
-
-| Script | Purpose |
-|--------|---------|
-| `quick-setup.sh` | One-click installation |
-| `setup-crons-hybrid.sh` | Configure cron tasks |
-| `register-agent.sh` | Register new agent |
-| `verify-setup.sh` | Validate configuration |
-| `list-all-crons.sh` | List all cron jobs |
-| `list-agent-crons.sh` | List agent-specific crons |
-| `cleanup-plugin-demo.sh` | Clean test data |
-| `knowledge-health-check.sh` | Check KG health |
+**Additional Resources:**
+- [CHANGELOG](./CHANGELOG.md) - Version history
+- [ROADMAP](./ROADMAP.md) - Future plans
+- [CONTRIBUTING](./CONTRIBUTING.md) - Contribution guide
+- [SECURITY](./SECURITY.md) - Security policy
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Whether it's bug reports, feature requests, documentation improvements, or code contributions—every help counts.
+We welcome contributions! Here's how to help:
 
-### How to Contribute
+### Quick Ways to Contribute
 
-1. **Fork & Clone**
-   ```bash
-   git clone https://github.com/luoboask/evo-cortex.git
-   cd evo-cortex
-   ```
+1. **Report Bugs** → [GitHub Issues](https://github.com/luoboask/evo-cortex/issues)
+2. **Suggest Features** → [Feature Request Template](https://github.com/luoboask/evo-cortex/issues/new?template=feature_request.md)
+3. **Improve Docs** → Submit PR with fixes
+4. **Share Feedback** → Join [Discussions](https://github.com/luoboask/evo-cortex/discussions)
 
-2. **Create Branch**
-   ```bash
-   git checkout -b feature/your-feature
-   ```
+### Development Setup
 
-3. **Make Changes**
+```bash
+# Fork and clone
+git clone https://github.com/luoboask/evo-cortex.git
+cd evo-cortex
 
-4. **Commit**
-   ```bash
-   git commit -m "feat: add your feature"
-   ```
+# Create branch
+git checkout -b feature/your-feature
 
-5. **Push & PR**
-   ```bash
-   git push origin feature/your-feature
-   ```
+# Make changes and commit
+git commit -m "feat: add your feature"
+
+# Push and open PR
+git push origin feature/your-feature
+```
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for detailed guidelines.
 
 ---
 
-## 📞 Community
+## 💬 Community
 
-| Platform | Link |
-|----------|------|
-| **npm** | [Package Page](https://www.npmjs.com/package/@evo-agents/evo-cortex) |
-| **GitHub** | [Repository](https://github.com/luoboask/evo-cortex) |
-| **Discord** | [OpenClaw Server](https://discord.gg/clawd) |
-| **Docs** | [OpenClaw Docs](https://docs.openclaw.ai) |
+| Platform | Purpose | Link |
+|----------|---------|------|
+| **GitHub** | Code, issues, PRs | [Repository](https://github.com/luoboask/evo-cortex) |
+| **Discord** | Chat, support | [OpenClaw Server](https://discord.gg/clawd) |
+| **npm** | Package stats | [@evo-agents/evo-cortex](https://www.npmjs.com/package/@evo-agents/evo-cortex) |
+| **Docs** | Official docs | [OpenClaw Docs](https://docs.openclaw.ai) |
 
-### Support
-
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/luoboask/evo-cortex/issues)
-- 💡 **Feature Requests**: [Feature Request Template](https://github.com/luoboask/evo-cortex/issues/new?template=feature_request.md)
-- ❓ **Questions**: [Discussions](https://github.com/luoboask/evo-cortex/discussions) or Discord
-
----
-
-## 📄 License
-
-MIT License - Free to use, modify, and distribute. See [LICENSE](./LICENSE) for details.
+**Need Help?**
+- 🐛 Bug reports: [Issues](https://github.com/luoboask/evo-cortex/issues)
+- 💡 Feature ideas: [Discussions](https://github.com/luoboask/evo-cortex/discussions)
+- ❓ Questions: Discord or GitHub Discussions
 
 ---
 
 ## 🙏 Acknowledgments
 
-Built with ❤️ for the OpenClaw community. Special thanks to all contributors and early adopters who made this project possible.
+Built with ❤️ for the OpenClaw community by the Evo-Agents Team.
+
+Special thanks to:
+- All contributors and early adopters
+- The OpenClaw core team
+- The broader AI agent community
 
 ---
 
-## 📈 Star History
+## 📄 License
 
-[![Star History Chart](https://api.star-history.com/svg?repos=luoboask/evo-cortex&type=Date)](https://star-history.com/#luoboask/evo-cortex&Date)
+[MIT License](./LICENSE) — Free to use, modify, and distribute.
 
 ---
 
 <div align="center">
 
-### 🧬 Made with ❤️ by Evo-Agents Team
+**🧬 Ready to give your agent a brain?**
 
-**Version 1.0.0** | Released: April 21, 2026
+```bash
+openclaw plugins install @evo-agents/evo-cortex
+```
 
-[🇨🇳 中文文档](./README.zh.md) • [🔝 Back to Top](#-evo-cortex)
+[Get Started](#-quick-start) • [View Documentation](./docs/) • [Star on GitHub](https://github.com/luoboask/evo-cortex/stargazers)
+
+---
+
+Made with ❤️ by **Evo-Agents Team** | v1.0.0 • April 21, 2026
+
+[🔝 Back to Top](#-evo-cortex)
 
 </div>
