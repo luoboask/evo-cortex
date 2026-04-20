@@ -1,0 +1,39 @@
+# 依赖
+node_modules/
+
+# 构建输出
+dist/
+build/
+*.tsbuildinfo
+
+# 测试
+tests/
+coverage/
+*.test.ts
+*.spec.ts
+
+# 开发配置
+.env
+.env.example
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# 文档（保留 README 和 LICENSE）
+CHANGELOG.md
+CONTRIBUTING.md
+*.md
+!README.md
+!LICENSE
+
+# 脚本（只保留必要的）
+scripts/presets/
+scripts/generate-npm-package.sh
+
+# 其他
+*.log
+.DS_Store
+Thumbs.db
