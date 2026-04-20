@@ -16,6 +16,7 @@ import { getLogger } from "./utils/logger";
 import { validateConfig, getConfigSummary } from "./utils/config-validator";
 import { getCache } from "./utils/cache";
 import { runHealthCheck, formatHealthReport } from "./tools/health-check";
+import { checkAndPrompt, markAsConfigured, isCronConfigured } from "./utils/cron-auto-setup";
 
 // 全局标志：确保废弃警告只显示一次
 let deprecationWarningShown = false;
@@ -99,6 +100,13 @@ const plugin = {
     
     logger.info(`Plugin registered. Enabled modules: ${getConfigSummary(config)}`);
     logger.debug(`Workspace: ${api.workspaceDir || 'default'}`);
+    
+    // 检查并提示配置定时任务（仅在首次加载时）
+    if (api.workspaceDir && !isCronConfigured(api.workspaceDir)) {
+      checkAndPrompt(api.workspaceDir, 'current-agent');
+      // 标记为已提示，避免每次加载都显示
+      markAsConfigured(api.workspaceDir);
+    }
     
     // 初始化全局缓存
     const searchCache = getCache('search_results', { maxEntries: 500, defaultTTL: 10 * 60 * 1000 });

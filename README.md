@@ -316,3 +316,78 @@ MIT
 
 - GitHub: https://github.com/evo-agents
 - 文档：https://docs.openclaw.ai/plugins/evo-cortex
+
+## ⚙️ 自动配置定时任务
+
+Evo-Cortex 插件需要定时任务来执行进化功能。使用提供的脚本自动配置：
+
+```bash
+# 为指定 agent 配置定时任务
+bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons.sh <agent-id> [basic|standard|full]
+
+# 示例：为标准配置（推荐）
+bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons.sh cortex-test-agent standard
+
+# 基础配置（仅核心任务）
+bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons.sh cortex-test-agent basic
+
+# 完整配置（全部任务）
+bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons.sh cortex-test-agent full
+```
+
+### 配置级别
+
+| 级别 | 任务数 | 说明 | 适用场景 |
+|------|--------|------|----------|
+| **basic** | 3 个 | 仅核心进化能力 | 资源有限或初次尝试 |
+| **standard** | 7 个 | 完整的自进化系统 | **推荐**，适合大多数用户 |
+| **full** | 9 个 | 最大化进化能力 | 高频使用场景，需要全面进化 |
+
+### 配置的任务
+
+#### 核心任务（HIGH 优先级）⭐
+所有级别都包含：
+- `hourly-fractal` - 每小时分形思考，生成元规则 (`0 * * * *`)
+- `daily-review` - 每日知识审查，优化知识结构 (`0 9 * * *`)
+- `active-learning` - 每日主动学习，检测知识缺口 (`0 4 * * *`)
+
+#### 增强任务（MEDIUM 优先级）🔶
+standard 和 full 级别包含：
+- `daily-compress` - 每日记忆压缩，生成摘要 (`0 9:30 * * *`)
+- `weekly-compress` - 每周记忆压缩，生成本周摘要 (`0 3 * * 0`)
+- `weekly-kg-expansion` - 每周知识图谱扩展 (`0 5 * * 0`)
+- `monthly-cycle` - 每月进化周期，整合元规则 (`0 2 1 * *`)
+
+#### 高级任务（LOW 优先级）🔷
+仅 full 级别包含：
+- `nightly-evolution` - 夜间进化总结 (`0 23 * * *`)
+- `session-scan` - 每 2 小时会话扫描 (`0 */2 * * *`)
+
+### 手动配置（可选）
+
+如果不想使用脚本，也可以手动添加：
+
+```bash
+openclaw cron add \
+  --name "my-hourly-fractal" \
+  --agent "my-agent" \
+  --cron "0 * * * *" \
+  --message "运行分形思考，生成元规则" \
+  --session isolated
+```
+
+### 监控和管理
+
+```bash
+# 查看所有任务
+openclaw cron list | grep <agent-id>
+
+# 手动触发测试
+openclaw cron run <task-id>
+
+# 查看执行历史
+openclaw cron runs <task-id> --limit 5
+
+# 删除任务
+openclaw cron remove <task-id>
+```
