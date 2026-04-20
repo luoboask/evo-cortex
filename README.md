@@ -26,7 +26,7 @@ Evo-Cortex 不是一个普通的插件，它是 Agent 的**"大脑"**，让 Agen
 
 ## 🚀 快速开始
 
-### 5 分钟配置
+### 方式 1: 本地安装（当前推荐）
 
 ```bash
 # 1. 安装插件
@@ -38,6 +38,19 @@ openclaw plugins install ~/.openclaw/extensions/evo-cortex
 # 3. 验证配置
 ~/.openclaw/extensions/evo-cortex/scripts/verify-setup.sh <your-agent-id>
 ```
+
+### 方式 2: npm 安装（即将支持）
+
+⚠️ **注意**: npm 包正在准备中，敬请期待！
+
+```bash
+# 未来可以通过 npm 安装
+openclaw plugins install @evo-agents/evo-cortex
+```
+
+查看发布进度：[Issue #XX](https://github.com/luoboask/evo-cortex/issues/xx)
+
+---
 
 就这么简单！然后正常使用 Agent，见证它逐渐变聪明！🦞
 
