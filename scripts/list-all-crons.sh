@@ -1,9 +1,21 @@
 #!/bin/bash
 # 完整列出 Agent 的所有 Cron 任务（解决输出截断问题）
+# 路径动态获取，支持任意 agent
 
-AGENT_KEYWORD="${1:-plugin-demo}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+AGENT_KEYWORD="${1:-}"
 
-echo "📋 $AGENT_KEYWORD 相关的 Cron 任务列表"
+if [ -z "$AGENT_KEYWORD" ]; then
+  echo "用法：$0 <agent-keyword>"
+  echo ""
+  echo "示例:"
+  echo "  $0 plugin-demo"
+  echo "  $0 cortex-test"
+  echo "  $0 main"
+  exit 1
+fi
+
+echo "📋 '$AGENT_KEYWORD' 相关的 Cron 任务列表"
 echo "======================================"
 echo ""
 

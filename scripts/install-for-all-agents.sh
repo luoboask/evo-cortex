@@ -166,7 +166,7 @@ if [ "$SUCCESS" -gt 0 ]; then
   echo "   openclaw cron list | grep -E \"$(echo $AGENTS_TO_CONFIGURE | tr ' ' '|')\""
   echo ""
   echo "2. 查看某个 Agent 的进化结果:"
-  echo "   cat ~/.openclaw/workspace-<agent>/evolution/<agent>/meta-rules-*.md"
+  echo "   cat $HOME/.openclaw/workspace-<agent>/evolution/<agent>/meta-rules-*.md"
   echo ""
   echo "3. 监控所有 Agent 的任务执行:"
   echo "   openclaw logs --follow | grep evolution"
@@ -200,7 +200,7 @@ $(echo "$AGENTS_TO_CONFIGURE" | tr ' ' '\n' | nl)
 openclaw cron list | grep -E "$(echo $AGENTS_TO_CONFIGURE | tr ' ' '|')"
 
 # 验证单个 Agent
-~/.openclaw/extensions/evo-cortex/scripts/verify-setup.sh <agent-id>
+$HOME/.openclaw/extensions/evo-cortex/scripts/verify-setup.sh <agent-id>
 \`\`\`
 
 ---
