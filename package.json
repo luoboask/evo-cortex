@@ -4,7 +4,9 @@
   "description": "完整的记忆、学习和进化能力 - OpenClaw 插件",
   "type": "module",
   "openclaw": {
-    "extensions": ["./src/index.ts"],
+    "extensions": [
+      "./src/index.ts"
+    ],
     "compat": {
       "pluginApi": ">=2026.3.24-beta.2",
       "minGatewayVersion": "2026.3.24-beta.2"
@@ -16,5 +18,15 @@
   },
   "dependencies": {
     "@sinclair/typebox": "^0.32.0"
+  },
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"scripts/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"scripts/**/*.ts\"",
+    "perf:report": "tsx scripts/generate-perf-report.ts"
   }
 }
