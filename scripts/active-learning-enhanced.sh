@@ -63,6 +63,45 @@ main() {
   safe_mkdir "$OUTPUT_DIR"
   safe_mkdir "$MEMORY_DIR"
   
+  # ────────────────────────────────────────────────────────
+  # 🔍 执行前检查：数据量是否足够
+  # ────────────────────────────────────────────────────────
+  
+  log_info "🔍 执行前检查..."
+  
+  local MEMORY_COUNT
+  MEMORY_COUNT=$(ls -1 "$MEMORY_DIR"/*.md 2>/dev/null | wc -l)
+  
+  if [ "$MEMORY_COUNT" -lt 3 ]; then
+    log_warning "记忆文件不足 ($MEMORY_COUNT < 3)，跳过本次执行"
+    log_info "💡 建议：先进行一些对话，积累数据后再运行"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "📊 执行摘要"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "总任务数：1"
+    echo "  ⏭️  跳过：1 (数据不足)"
+    echo "  ✅ 新建：0"
+    echo "  ❌ 失败：0"
+    echo ""
+    echo "✨ 已跳过，等待更多数据"
+    exit 0
+  fi
+  
+  log_success "数据量检查通过 ($MEMORY_COUNT 个记忆文件)"
+  
+  # 检查记忆文件总大小
+  local TOTAL_SIZE
+  TOTAL_SIZE=$(du -sm "$MEMORY_DIR" 2>/dev/null | cut -f1)
+  
+  if [ "${TOTAL_SIZE:-0}" -lt 1 ]; then
+    log_warning "记忆数据总量过小 (${TOTAL_SIZE}MB)，分析结果可能有限"
+  else
+    log_success "数据总量检查通过 (${TOTAL_SIZE}MB)"
+  fi
+  
+  echo ""
+  
   local CREATED=0
   local SKIPPED=0
   local FAILED=0
@@ -306,6 +345,50 @@ EOF
   log_success "已生成学习报告：$REPORT_FILE"
   ((CREATED++))
   
+  # ────────────────────────────────────────────────────────
+  # ✅ 执行后验证：成功标准检查
+  # ────────────────────────────────────────────────────────
+  
+  echo ""
+  log_info "✅ 验证执行结果..."
+  
+  local VERIFY_PASSED=0
+  local VERIFY_FAILED=0
+  
+  # 验证 1: 词频文件是否生成且非空
+  if [ -s "$WORD_FREQ_OUTPUT" ]; then
+    log_success "✅ 词频分析成功 (Top $(wc -l < "$WORD_FREQ_OUTPUT") 个词)"
+    ((VERIFY_PASSED++))
+  else
+    log_error "❌ 词频分析失败：文件为空或不存在"
+    ((VERIFY_FAILED++))
+  fi
+  
+  # 验证 2: 用户偏好文件是否存在
+  if [ -f "$PREFERENCES_FILE" ]; then
+    log_success "✅ 用户偏好文件存在"
+    ((VERIFY_PASSED++))
+  else
+    log_error "❌ 用户偏好文件未创建"
+    ((VERIFY_FAILED++))
+  fi
+  
+  # 验证 3: 学习报告是否生成
+  if [ -s "$REPORT_FILE" ]; then
+    log_success "✅ 学习报告已生成"
+    ((VERIFY_PASSED++))
+  else
+    log_error "❌ 学习报告未生成或为空"
+    ((VERIFY_FAILED++))
+  fi
+  
+  echo ""
+  echo "验证结果：$VERIFY_PASSED 通过，$VERIFY_FAILED 失败"
+  
+  if [ $VERIFY_FAILED -gt 0 ]; then
+    log_warning "⚠️  部分验证失败，请检查日志"
+  fi
+  
   # 记录结束时间
   echo ""
   end_timer "主动学习"
@@ -316,7 +399,7 @@ EOF
   fi
   
   # 显示摘要
-  print_summary $CREATED $SKIPPED $FAILED
+  print_summary $CREATED $SKIPPED $((FAILED + VERIFY_FAILED))
 }
 
 show_usage() {

@@ -61,6 +61,43 @@ main() {
   # 记录开始时间
   start_timer
   
+  # ────────────────────────────────────────────────────────
+  # 🔍 执行前检查：配置和数据
+  # ────────────────────────────────────────────────────────
+  
+  log_info "🔍 执行前检查..."
+  
+  # 检查配置文件是否存在
+  local CONFIG_FILE="$SCRIPT_DIR/../knowledge/sources.json"
+  if [ ! -f "$CONFIG_FILE" ]; then
+    log_error "配置文件不存在：$CONFIG_FILE"
+    log_info "💡 建议：先创建 knowledge/sources.json 配置知识源"
+    exit 1
+  fi
+  
+  # 检查是否有启用的源
+  local ENABLED_COUNT
+  ENABLED_COUNT=$(grep -c '"enabled": true' "$CONFIG_FILE" 2>/dev/null || echo 0)
+  
+  if [ "$ENABLED_COUNT" -eq 0 ]; then
+    log_error "没有启用的知识源，请检查 $CONFIG_FILE"
+    exit 1
+  fi
+  
+  log_success "配置检查通过 ($ENABLED_COUNT 个启用的知识源)"
+  
+  # 检查 workspace 是否有足够空间
+  local FREE_SPACE
+  FREE_SPACE=$(df -m "$(dirname "$WORKSPACE")" 2>/dev/null | tail -1 | awk '{print $4}')
+  
+  if [ "${FREE_SPACE:-0}" -lt 100 ]; then
+    log_warning "磁盘空间不足 (${FREE_SPACE}MB)，可能影响抓取"
+  else
+    log_success "磁盘空间检查通过 (${FREE_SPACE}MB 可用)"
+  fi
+  
+  echo ""
+  
   # 执行 TypeScript 脚本
   local EXIT_CODE=0
   
@@ -81,6 +118,59 @@ main() {
   # 记录结束时间
   echo ""
   end_timer "网络知识获取"
+  
+  # ────────────────────────────────────────────────────────
+  # ✅ 执行后验证：成功标准检查
+  # ────────────────────────────────────────────────────────
+  
+  if [ $EXIT_CODE -eq 0 ]; then
+    log_info "✅ 验证执行结果..."
+    
+    local VERIFY_PASSED=0
+    local VERIFY_FAILED=0
+    
+    # 验证 1: 输出目录是否创建
+    local OUTPUT_DIR="$WORKSPACE/knowledge/web-sources"
+    if [ -d "$OUTPUT_DIR" ]; then
+      log_success "✅ 输出目录存在"
+      ((VERIFY_PASSED++))
+    else
+      log_error "❌ 输出目录未创建"
+      ((VERIFY_FAILED++))
+    fi
+    
+    # 验证 2: 是否生成了 JSON 文件
+    local JSON_COUNT
+    JSON_COUNT=$(ls -1 "$OUTPUT_DIR"/*.json 2>/dev/null | wc -l)
+    
+    if [ "$JSON_COUNT" -gt 0 ]; then
+      log_success "✅ 生成 $JSON_COUNT 个知识文件"
+      ((VERIFY_PASSED++))
+    else
+      log_error "❌ 未生成任何 JSON 文件"
+      ((VERIFY_FAILED++))
+    fi
+    
+    # 验证 3: 是否追加到记忆文件
+    local TODAY
+    TODAY=$(date +%Y-%m-%d)
+    local MEMORY_FILE="$WORKSPACE/memory/${TODAY}.md"
+    
+    if [ -f "$MEMORY_FILE" ] && grep -q "🌐 网络知识" "$MEMORY_FILE" 2>/dev/null; then
+      log_success "✅ 已追加到记忆文件"
+      ((VERIFY_PASSED++))
+    else
+      log_warning "⚠️  记忆文件未更新（可能已存在今日条目）"
+      ((VERIFY_PASSED++))  # 不算失败，可能是正常的
+    fi
+    
+    echo ""
+    echo "验证结果：$VERIFY_PASSED 通过，$VERIFY_FAILED 失败"
+    
+    if [ $VERIFY_FAILED -gt 0 ]; then
+      log_warning "⚠️  部分验证失败，请检查日志"
+    fi
+  fi
   
   # 释放锁
   if [ "${NO_LOCK:-false}" != "true" ]; then

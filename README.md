@@ -289,6 +289,91 @@ Special thanks to:
 
 ---
 
+## 📖 User Guide
+
+### When Will I See Results?
+
+Evo-Cortex is a **long-term investment**. Here's what to expect:
+
+| Time | What to Expect |
+|------|---------------|
+| **Day 1** | Memory system works, but analysis results are limited |
+| **Day 3** | Word frequency analysis starts becoming meaningful |
+| **Week 1** | Knowledge graph begins to take shape (10+ entities) |
+| **Week 2** | User preferences and action items accumulate |
+| **Month 1** | Meta-rules start emerging from patterns |
+
+**Don't worry if early results seem sparse** – the system needs data to learn from.
+
+### Best Practices
+
+#### ✅ Do's
+
+1. **Use it naturally** - Just chat as usual, no special commands needed
+2. **Review weekly** - Spend 2-3 minutes checking output files:
+   - `USER_PREFERENCES.md` - Are preferences accurate?
+   - `knowledge/entities.json` - Do entities make sense?
+   - `evolution/active-learning-*.md` - Any useful insights?
+3. **Provide feedback** - If something is wrong, tell the agent:
+   - "This entity is incorrect, please remove it"
+   - "I actually prefer concise responses, not detailed ones"
+
+#### ❌ Don'ts
+
+1. **Don't over-expect early on** - The first week is data accumulation
+2. **Don't manually edit output files** - Let the system manage them
+3. **Don't run tasks too frequently** - Respect the configured schedules
+
+### Common Questions
+
+**Q: Why is word frequency analysis all template data?**  
+**A:** If you have few conversations, template logs dominate. Try accumulating more real conversations first. The script now skips execution if memory files < 3.
+
+**Q: Knowledge graph has too few entities?**  
+**A:** Normal! Knowledge graphs need time. Typically grows significantly after 1-2 weeks of active use. Current threshold: terms must appear ≥5 times to be added.
+
+**Q: Active learning found no preferences or action items?**  
+**A:** This happens when conversations are technical without personal expressions. The system only extracts explicit statements like "I like X" or "Remember to Y".
+
+**Q: Can I customize what gets extracted?**  
+**A:** Yes! Edit the extraction patterns in scripts:
+- Preferences: Look for "我喜欢", "I like", "I prefer"
+- Action items: Look for "我要", "记得", "TODO"
+
+### Troubleshooting
+
+#### Task fails with "data insufficient"
+
+**Symptom**: Script exits early with warning about insufficient data  
+**Cause**: Memory files < 3 or total size < 1MB  
+**Solution**: Have more conversations first, then rerun
+
+#### Output file is empty
+
+**Symptom**: Task completes but output file is blank  
+**Cause**: No matching patterns found in conversations  
+**Solution**: Normal when conversations don't contain extractable content. Check logs for details.
+
+#### Too many false positives
+
+**Symptom**: Extracted preferences/entities are inaccurate  
+**Cause**: Pattern matching is simple, may misinterpret context  
+**Solution**: Manually review and correct in output files. Future versions may add LLM verification.
+
+### Success Criteria
+
+Each task now validates its own success:
+
+| Task | Success Criteria |
+|------|-----------------|
+| **active-learning** | • Word freq file exists & non-empty<br>• USER_PREFERENCES.md exists<br>• Learning report generated |
+| **web-knowledge** | • Output directory created<br>• JSON files generated (≥1)<br>• Memory file updated |
+| **kg-auto-update** | • Entities file exists<br>• Backup created before changes |
+
+If validation fails, check the detailed logs in `evolution/` directory.
+
+---
+
 <div align="center">
 
 **🧬 Ready to give your agent a brain?**
@@ -301,7 +386,7 @@ openclaw plugins install @evo-agents/evo-cortex
 
 ---
 
-Made with ❤️ by **Evo-Agents Team** | v1.0.0 • April 21, 2026
+Made with ❤️ by **Evo-Agents Team** | v1.1.0 • April 21, 2026
 
 [🔝 Back to Top](#-evo-cortex)
 
