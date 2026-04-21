@@ -305,7 +305,7 @@ EOF
   cat > "$REPORT_FILE" << EOF
 # Active Learning Report - $TODAY
 
-**Agent**: $AGENTID  
+**Agent**: $AGENT_ID  
 **执行时间**: $(date '+%Y-%m-%d %H:%M:%S')  
 
 ---
