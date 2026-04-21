@@ -108,7 +108,7 @@ fi
 echo ""
 
 # 直接执行 full 配置
-bash "$SCRIPT_DIR/setup-crons-hybrid.sh" "$AGENT_NAME"
+bash "$SCRIPT_DIR/setup-crons.sh" "$AGENT_NAME"
 
 # 完成
 echo ""

@@ -139,3 +139,38 @@ Three preset configurations available:
 **For detailed release notes, see:** [PUBLISH_SUCCESS.md](./PUBLISH_SUCCESS.md)
 
 **Contributing:** See [CONTRIBUTING.md](./CONTRIBUTING.md)
+
+## [1.1.0] - 2026-04-21
+
+### 🎯 Unified Configuration
+
+**BREAKING CHANGE**: Simplified to single configuration mode.
+
+#### Changed
+- **Unified to Script-Only Mode**: All tasks now use pure script execution (zero LLM API calls)
+- **Simplified Installation**: Single `setup-crons.sh` script replaces hybrid/smart/script-only variants
+- **Zero Cost**: $0.00/day operating cost with 100% reliability
+- **Faster Execution**: <1 second per task
+
+#### Removed
+- `scripts/setup-crons-hybrid.sh` - Hybrid mode removed
+- `scripts/setup-crons-smart.sh` - Smart fallback mode removed
+- `scripts/check-rate-limit.sh` - No longer needed without LLM dependencies
+- `scripts/disable-llm-tasks.sh` - No longer needed
+- `scripts/cleanup-plugin-demo.sh` - Temporary cleanup script removed
+
+#### Migration
+If you previously installed Evo-Cortex:
+```bash
+# Re-run setup to migrate to unified configuration
+bash scripts/setup-crons.sh <your-agent-id>
+```
+
+This automatically removes old tasks and creates the new unified set.
+
+### 📚 Documentation
+- Added `docs/UNIFIED_CONFIG.md` - Complete unified configuration guide
+- Updated README with simplified installation instructions
+- Removed multi-mode comparison tables
+
+---

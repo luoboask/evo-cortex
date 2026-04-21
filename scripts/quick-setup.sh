@@ -252,7 +252,7 @@ echo ""
 echo "⏰ 配置 Evo-Cortex 定时任务 (full 级别，9 个任务)"
 echo ""
 
-bash "$SCRIPT_DIR/setup-crons-hybrid.sh" "$AGENT_ID"
+bash "$SCRIPT_DIR/setup-crons.sh" "$AGENT_ID"
 
 # ========== 步骤 5: 完成 ==========
 echo ""
