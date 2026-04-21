@@ -1,241 +1,353 @@
 #!/bin/bash
-# =============================================================================
-# Evo-Cortex Active Learning (Enhanced)
+# ═══════════════════════════════════════════════════════════
+# 🧠 Evo-Cortex 主动学习（增强版）
+# ═══════════════════════════════════════════════════════════
 # 功能：词频分析 + 用户偏好提取 + 待办事项识别
+# 特点：幂等、并发安全、支持多 Agent 同时调用
 # 用法：bash active-learning-enhanced.sh <agent-id>
-# =============================================================================
+# ═══════════════════════════════════════════════════════════
 
-set -e
+set -euo pipefail
 
-AGENT_ID="${1:-}"
-if [ -z "$AGENT_ID" ]; then
-  echo "❌ 错误：请提供 agent-id"
-  echo "用法：$0 <agent-id>"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# 加载通用库
+if [ -f "$SCRIPT_DIR/lib.sh" ]; then
+  source "$SCRIPT_DIR/lib.sh"
+else
+  echo "[ERROR] 未找到 lib.sh 库文件：$SCRIPT_DIR/lib.sh"
   exit 1
 fi
 
-WORKSPACE="$HOME/.openclaw/workspace-$AGENT_ID"
-MEMORY_DIR="$WORKSPACE/memory"
-PREFERENCES_FILE="$WORKSPACE/USER_PREFERENCES.md"
-ACTION_ITEMS_FILE="$WORKSPACE/action-items.md"
-OUTPUT_DIR="$WORKSPACE/evolution"
-
-# 确保输出目录存在
-mkdir -p "$OUTPUT_DIR"
-
-echo "╔════════════════════════════════════════════════════════╗"
-echo "║  🧠 Evo-Cortex Active Learning (Enhanced)              ║"
-echo "╚════════════════════════════════════════════════════════╝"
-echo ""
-echo "📦 Agent: $AGENT_ID"
-echo "📁 Workspace: $WORKSPACE"
-echo ""
-
-# =============================================================================
-# 功能 1: 词频分析（原有功能）
-# =============================================================================
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "1️⃣  词频分析"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-# 获取最近 24 小时的记忆文件
-YESTERDAY=$(date -v-1d +%Y-%m-%d 2>/dev/null || date -d "yesterday" +%Y-%m-%d)
-TODAY=$(date +%Y-%m-%d)
-
-echo "分析时间段：$YESTERDAY ~ $TODAY"
-echo ""
-
-# 合并所有记忆文件内容进行分析
-TEMP_FILE=$(mktemp)
-for f in "$MEMORY_DIR"/*.md "$MEMORY_DIR"/**/*.md; do
-  if [ -f "$f" ]; then
-    # 只分析最近 2 天的文件
-    FILE_DATE=$(stat -f "%Sm" -t "%Y-%m-%d" "$f" 2>/dev/null || stat -c "%y" "$f" 2>/dev/null | cut -d' ' -f1)
-    if [[ "$FILE_DATE" >= "$YESTERDAY" ]]; then
-      cat "$f" >> "$TEMP_FILE"
-      echo "  📄 $(basename "$f")"
+main() {
+  # 解析参数
+  if [ "${1:-}" = "-h" ] || [ "${1:-}" = "--help" ]; then
+    show_usage
+    exit 0
+  fi
+  
+  # 验证 Agent ID
+  local AGENT_ID
+  AGENT_ID=$(validate_agent_id "${1:-}")
+  
+  log_info "🧠 Evo-Cortex 主动学习 (Enhanced)"
+  log_info "Agent: $AGENT_ID"
+  
+  # 验证 Workspace
+  local WORKSPACE
+  WORKSPACE=$(validate_workspace "$AGENT_ID")
+  log_info "Workspace: $WORKSPACE"
+  
+  # 定义路径
+  local MEMORY_DIR="$WORKSPACE/memory"
+  local PREFERENCES_FILE="$WORKSPACE/USER_PREFERENCES.md"
+  local ACTION_ITEMS_FILE="$WORKSPACE/action-items.md"
+  local OUTPUT_DIR="$WORKSPACE/evolution"
+  
+  # 检查依赖
+  check_dependencies "awk" "sort" "uniq"
+  
+  # 设置锁
+  local LOCK_NAME="active-learning-$AGENT_ID"
+  if [ "${NO_LOCK:-false}" != "true" ]; then
+    if ! acquire_lock "$LOCK_NAME" 300; then
+      log_error "无法获取锁，可能有其他实例正在运行"
+      exit 1
     fi
   fi
-done
-
-echo ""
-echo "正在分析词频..."
-
-# 提取关键词（简单的词频统计）
-WORD_FREQ=$(cat "$TEMP_FILE" | \
-  grep -oE '\b[A-Za-z][A-Za-z0-9_-]{2,}\b' | \
-  grep -vE '^(the|and|for|with|from|that|this|have|been|were|are|was|will|would|could|should|can|may|might|must|shall|need|dare|ought|used|let|say|said|get|got|make|made|go|went|come|came|take|took|see|saw|know|knew|think|thought|want|wanting|like|likes|liked|love|loves|loved|just|very|really|also|only|even|well|back|after|before|again|never|always|often|sometimes|usually|already|still|yet|then|when|where|why|how|what|which|who|whom|whose|into|over|such|some|any|each|all|both|few|many|much|no|yes|not|but|or|nor|so|if|in|on|at|to|of|by|as|is|it|its|he|she|they|them|their|his|her|we|us|our|you|your|i|my|me|a|an)$' | \
-  sort | uniq -c | sort -rn | head -30)
-
-echo ""
-echo "Top 30 词频:"
-echo "$WORD_FREQ" | while read count word; do
-  printf "  %-30s %d\n" "$word" "$count"
-done
-
-# 保存词频报告
-REPORT_FILE="$OUTPUT_DIR/active-learning-$(date +%Y-%m-%d-%H%M).md"
-cat > "$REPORT_FILE" << EOF
-# 📊 Active Learning Report
-
-**生成时间**: $(date '+%Y-%m-%d %H:%M:%S')  
-**分析时段**: $YESTERDAY ~ $TODAY
-
-## Top 30 词频
-
-\`\`\`
-$WORD_FREQ
-\`\`\`
-
-## 洞察
-
-<!-- 系统自动生成的洞察 -->
-EOF
-
-echo ""
-echo "✅ 词频报告已保存：$REPORT_FILE"
-
-# =============================================================================
-# 功能 2: 用户偏好提取（新增功能）
-# =============================================================================
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "2️⃣  用户偏好提取"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-if [ ! -f "$PREFERENCES_FILE" ]; then
-  echo "⚠️  未找到 USER_PREFERENCES.md，跳过偏好提取"
-else
-  echo "📄 读取偏好文件：$PREFERENCES_FILE"
   
-  # 搜索偏好相关的表达
+  # 记录开始时间
+  start_timer
+  
+  # 确保输出目录存在
+  safe_mkdir "$OUTPUT_DIR"
+  safe_mkdir "$MEMORY_DIR"
+  
+  local CREATED=0
+  local SKIPPED=0
+  local FAILED=0
+  
   echo ""
-  echo "扫描偏好相关表达..."
+  log_info "开始主动学习..."
+  echo ""
   
-  # 提取"我喜欢"、"我不喜欢"、"我偏好"等模式
-  PREFERENCES_FOUND=""
+  # ────────────────────────────────────────────────────────
+  # 步骤 1: 词频分析
+  # ────────────────────────────────────────────────────────
   
-  # 搜索中文偏好表达
-  while IFS= read -r line; do
-    if [ -n "$line" ]; then
-      echo "  💡 发现偏好：$line"
-      PREFERENCES_FOUND="$PREFERENCES_FOUND\n- $line"
-    fi
-  done < <(grep -hE "(我喜欢 | 我不喜欢 | 我偏好 | 我希望 | 我想要 | 我讨厌 | 我讨厌)" "$TEMP_FILE" 2>/dev/null | head -5 || true)
+  log_info "步骤 1: 词频分析..."
   
-  # 搜索英文偏好表达
-  while IFS= read -r line; do
-    if [ -n "$line" ]; then
-      echo "  💡 Found preference: $line"
-      PREFERENCES_FOUND="$PREFERENCES_FOUND\n- $line"
-    fi
-  done < <(grep -hE "(I prefer|I like|I love|I don't like|I hate|I want|I need)" "$TEMP_FILE" 2>/dev/null | head -5 || true)
+  local TODAY=$(date +%Y-%m-%d)
+  local WORD_FREQ_OUTPUT="$OUTPUT_DIR/word-frequency-$TODAY.txt"
   
-  if [ -n "$PREFERENCES_FOUND" ]; then
-    echo ""
-    echo "✅ 发现新的偏好表达，准备更新偏好文件..."
-    
-    # 添加到偏好文件的"自动提取的偏好"部分
-    TEMP_PREF=$(mktemp)
-    cat "$PREFERENCES_FILE" > "$TEMP_PREF"
-    
-    # 查找"### 最近提及的需求"部分并添加新内容
-    if grep -q "### 最近提及的需求" "$PREFERENCES_FILE"; then
-      # 在已有部分后添加
-      sed -i.bak "/### 最近提及的需求/a\\
-- $(date '+%Y-%m-%d'):$(echo -e "$PREFERENCES_FOUND" | head -3)" "$PREFERENCES_FILE"
-    else
-      echo "" >> "$PREFERENCES_FILE"
-      echo "### 最近提及的需求" >> "$PREFERENCES_FILE"
-      echo "- $(date '+%Y-%m-%d'):$(echo -e "$PREFERENCES_FOUND" | head -3)" >> "$PREFERENCES_FILE"
-    fi
-    
-    rm -f "${PREFERENCES_FILE}.bak"
-    echo "✅ 偏好文件已更新"
+  if file_exists_and_not_empty "$WORD_FREQ_OUTPUT"; then
+    log_warning "词频分析已存在，跳过：$WORD_FREQ_OUTPUT"
+    ((SKIPPED++))
   else
-    echo "ℹ️  未发现新的偏好表达"
+    # 合并所有记忆文件并统计词频
+    if [ -d "$MEMORY_DIR" ]; then
+      cat "$MEMORY_DIR"/*.md 2>/dev/null | \
+        tr '[:upper:]' '[:lower:]' | \
+        tr -cs '[:alpha:]' '\n' | \
+        grep -E '^[a-z]{4,20}$' | \
+        sort | uniq -c | sort -rn | head -50 > "$WORD_FREQ_OUTPUT"
+      
+      if [ -s "$WORD_FREQ_OUTPUT" ]; then
+        log_success "词频分析完成：${#WORD_FREQ_OUTPUT}"
+        ((CREATED++))
+      else
+        log_warning "未找到有效的词频数据"
+        ((FAILED++))
+      fi
+    else
+      log_warning "记忆目录不存在：$MEMORY_DIR"
+      ((FAILED++))
+    fi
   fi
-fi
-
-# =============================================================================
-# 功能 3: 待办事项识别（新增功能）
-# =============================================================================
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "3️⃣  待办事项识别"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-echo "扫描待办事项..."
-
-# 提取待办相关的表达
-TODO_FOUND=""
-
-# 搜索中文待办表达
-while IFS= read -r line; do
-  if [ -n "$line" ]; then
-    echo "  📌 发现待办：$line"
-    TODO_FOUND="$TODO_FOUND\n- [ ] $line (来源：$(date '+%Y-%m-%d'))"
-  fi
-done < <(grep -hE "(我要 | 我需要 | 记得 | 稍后 | 晚点 | 下周 | 明天 | 待会 | 等一下)" "$TEMP_FILE" 2>/dev/null | grep -vE "^(#|\*|-)" | head -5 || true)
-
-# 搜索英文待办表达
-while IFS= read -r line; do
-  if [ -n "$line" ]; then
-    echo "  📌 Found TODO: $line"
-    TODO_FOUND="$TODO_FOUND\n- [ ] $line (Source: $(date '+%Y-%m-%d'))"
-  fi
-done < <(grep -hE "(I need to|I should|I will|I'll|Remember to|Don't forget)" "$TEMP_FILE" 2>/dev/null | grep -vE "^(#|\*|-)" | head -5 || true)
-
-if [ -n "$TODO_FOUND" ]; then
-  echo ""
-  echo "✅ 发现新的待办事项，更新待办文件..."
   
-  # 创建或更新待办文件
-  if [ ! -f "$ACTION_ITEMS_FILE" ]; then
-    cat > "$ACTION_ITEMS_FILE" << 'TODO_HEADER'
-# 📋 待办事项追踪
+  # ────────────────────────────────────────────────────────
+  # 步骤 2: 用户偏好提取
+  # ────────────────────────────────────────────────────────
+  
+  log_info "步骤 2: 用户偏好提取..."
+  
+  if [ -f "$PREFERENCES_FILE" ]; then
+    log_info "用户偏好文件已存在：$PREFERENCES_FILE"
+    
+    # 追加新的偏好（如果检测到）
+    local NEW_PREFS=""
+    
+    # 搜索"我喜欢"、"我不喜欢"等模式
+    if grep -q "我喜欢\|I like\|I prefer" "$MEMORY_DIR"/*.md 2>/dev/null; then
+      NEW_PREFS=$(grep -h "我喜欢\|I like\|I prefer" "$MEMORY_DIR"/*.md 2>/dev/null | sort -u)
+    fi
+    
+    if [ -n "$NEW_PREFS" ]; then
+      log_info "发现新的偏好表达，追加到文件..."
+      echo "" >> "$PREFERENCES_FILE"
+      echo "## 【$TODAY】新增偏好" >> "$PREFERENCES_FILE"
+      echo "$NEW_PREFS" >> "$PREFERENCES_FILE"
+      log_success "已更新用户偏好"
+      ((CREATED++))
+    else
+      log_info "未发现新的偏好表达"
+      ((SKIPPED++))
+    fi
+  else
+    # 创建新的偏好文件
+    log_info "创建用户偏好模板..."
+    cat > "$PREFERENCES_FILE" << EOF
+# USER_PREFERENCES.md - 用户偏好配置
 
-> 此文件由 Evo-Cortex 自动维护，记录对话中提取的待办事项。
-> 系统会定期检查是否有逾期或已完成的待办。
-
-**最后更新**: $(date '+%Y-%m-%d')
+**Agent**: $AGENT_ID  
+**创建时间**: $TODAY  
+**最后更新**: $TODAY
 
 ---
 
-## 待办列表
+## 🎯 沟通风格
 
-TODO_HEADER
+- [ ] 简洁（只说重点）
+- [x] 平衡（解释 + 示例）
+- [ ] 详细（全面深入）
+
+## 💬 代码示例
+
+- [x] 优先提供代码示例
+- [ ] 仅在需要时提供
+- [ ] 不需要代码示例
+
+## 🛠️ 技术栈偏好
+
+### 前端
+- [ ] React
+- [ ] Vue
+- [ ] Svelte
+- [x] Next.js
+
+### 后端
+- [x] Node.js
+- [ ] Python
+- [ ] Go
+- [ ] Rust
+
+### 数据库
+- [ ] PostgreSQL
+- [x] Prisma
+- [ ] MongoDB
+- [ ] SQLite
+
+## 📝 格式偏好
+
+- [x] 使用 bullet points
+- [ ] 使用编号列表
+- [x] 使用表格展示对比
+- [ ] 避免使用表格
+
+## ⏰ 工作时间
+
+- 工作日：09:00 - 18:00
+- 周末：灵活
+
+## 🚫 明确表达过的不喜欢
+
+- （待补充）
+
+---
+
+## 📅 历史更新
+
+### $TODAY
+- 初始创建
+
+EOF
+    log_success "已创建用户偏好文件：$PREFERENCES_FILE"
+    ((CREATED++))
   fi
   
-  # 添加新待办
-  echo -e "\n### $(date '+%Y-%m-%d') 新增\n$TODO_FOUND" >> "$ACTION_ITEMS_FILE"
+  # ────────────────────────────────────────────────────────
+  # 步骤 3: 待办事项识别
+  # ────────────────────────────────────────────────────────
   
-  echo "✅ 待办文件已更新：$ACTION_ITEMS_FILE"
-else
-  echo "ℹ️  未发现新的待办事项"
-fi
+  log_info "步骤 3: 待办事项识别..."
+  
+  if [ -f "$ACTION_ITEMS_FILE" ]; then
+    log_info "待办文件已存在：$ACTION_ITEMS_FILE"
+  fi
+  
+  # 搜索待办模式："我要"、"记得"、"稍后"、"TODO"
+  local ACTION_ITEMS=""
+  
+  if grep -q "我要\|我需要\|记得\|稍后\|TODO\|to-do" "$MEMORY_DIR"/*.md 2>/dev/null; then
+    ACTION_ITEMS=$(grep -h "我要\|我需要\|记得\|稍后\|TODO\|to-do" "$MEMORY_DIR"/*.md 2>/dev/null | sort -u)
+  fi
+  
+  if [ -n "$ACTION_ITEMS" ]; then
+    log_info "发现待办事项，更新文件..."
+    
+    if [ ! -f "$ACTION_ITEMS_FILE" ]; then
+      cat > "$ACTION_ITEMS_FILE" << EOF
+# Action Items - 待办事项追踪
 
-# =============================================================================
-# 清理
-# =============================================================================
-rm -f "$TEMP_FILE"
+**Agent**: $AGENT_ID  
+**创建时间**: $TODAY  
+**最后更新**: $TODAY
 
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "✨ Active Learning 完成！"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "生成的文件:"
-echo "  📄 词频报告：$REPORT_FILE"
-if [ -f "$PREFERENCES_FILE" ]; then
-  echo "  📄 偏好文件：$PREFERENCES_FILE"
-fi
-if [ -f "$ACTION_ITEMS_FILE" ]; then
-  echo "  📄 待办文件：$ACTION_ITEMS_FILE"
-fi
+---
 
-echo ""
-echo "🦞 学习完成！"
+## 📋 待办列表
+
+EOF
+    fi
+    
+    # 追加新的待办（去重）
+    echo "### $TODAY 新增" >> "$ACTION_ITEMS_FILE"
+    echo "$ACTION_ITEMS" | while read -r line; do
+      if ! grep -qF "$line" "$ACTION_ITEMS_FILE"; then
+        echo "- [ ] $line" >> "$ACTION_ITEMS_FILE"
+      fi
+    done
+    
+    log_success "已更新待办事项"
+    ((CREATED++))
+  else
+    log_info "未发现新的待办事项"
+    ((SKIPPED++))
+  fi
+  
+  # ────────────────────────────────────────────────────────
+  # 步骤 4: 生成学习报告
+  # ────────────────────────────────────────────────────────
+  
+  log_info "步骤 4: 生成学习报告..."
+  
+  local REPORT_FILE="$OUTPUT_DIR/active-learning-$TODAY.md"
+  
+  cat > "$REPORT_FILE" << EOF
+# Active Learning Report - $TODAY
+
+**Agent**: $AGENTID  
+**执行时间**: $(date '+%Y-%m-%d %H:%M:%S')  
+
+---
+
+## 📊 词频 Top 30
+
+$(head -30 "$WORD_FREQ_OUTPUT" 2>/dev/null | awk '{printf "%-30s %d\n", $2, $1}' || echo "无数据")
+
+---
+
+## 💡 洞察
+
+$(
+  if [ -s "$WORD_FREQ_OUTPUT" ]; then
+    local top_word=$(head -1 "$WORD_FREQ_OUTPUT" | awk '{print $2}')
+    local top_count=$(head -1 "$WORD_FREQ_OUTPUT" | awk '{print $1}')
+    echo "• 最高频词汇：**$top_word** ($top_count 次)"
+    echo "• 这表明你最近关注 ${top_word}相关的话题"
+  else
+    echo "• 暂无足够数据进行词频分析"
+  fi
+)
+
+---
+
+## ✅ 本次执行
+
+- 词频分析：$([ -s "$WORD_FREQ_OUTPUT" ] && echo "✅" || echo "❌")
+- 用户偏好：$([ -f "$PREFERENCES_FILE" ] && echo "✅" || echo "❌")
+- 待办事项：$([ -f "$ACTION_ITEMS_FILE" ] && echo "✅" || echo "❌")
+
+---
+
+*此报告由 Evo-Cortex 自动生成*
+EOF
+  
+  log_success "已生成学习报告：$REPORT_FILE"
+  ((CREATED++))
+  
+  # 记录结束时间
+  echo ""
+  end_timer "主动学习"
+  
+  # 释放锁
+  if [ "${NO_LOCK:-false}" != "true" ]; then
+    release_lock "$LOCK_NAME"
+  fi
+  
+  # 显示摘要
+  print_summary $CREATED $SKIPPED $FAILED
+}
+
+show_usage() {
+  cat << EOF
+用法：$(basename "$0") <agent-id> [选项]
+
+🧠 Evo-Cortex 主动学习（增强版）
+
+参数:
+  agent-id    OpenClaw Agent 的唯一标识符
+
+选项:
+  -h, --help     显示帮助信息
+  --no-lock      禁用锁机制（不推荐）
+
+功能:
+  • 词频分析（Top 50）
+  • 用户偏好提取（识别"我喜欢"等表达）
+  • 待办事项识别（识别"我要"、"记得"等）
+  • 生成详细学习报告
+
+输出:
+  • evolution/word-frequency-YYYY-MM-DD.txt
+  • evolution/active-learning-YYYY-MM-DD.md
+  • USER_PREFERENCES.md（如不存在则创建）
+  • action-items.md（如不存在则创建）
+
+建议运行频率:
+  • 每天凌晨 4 点：0 4 * * *
+
+EOF
+}
+
+main "$@"
