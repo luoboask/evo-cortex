@@ -44,7 +44,7 @@ cd "$SCRIPT_DIR"
 echo "🚀 开始获取网络知识..."
 echo ""
 
-$TS_CMD web-knowledge-fetcher.ts "$AGENT_ID"
+$TS_CMD web-knowledge-fetcher-simple.ts "$AGENT_ID"
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

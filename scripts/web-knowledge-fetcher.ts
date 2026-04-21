@@ -7,7 +7,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { WebCrawler, CrawledPage } from '../src/knowledge/web_crawler';
+import { WebCrawler, CrawledPage } from '../src/knowledge/web_crawler.js';
 
 interface KnowledgeSource {
   id: string;
