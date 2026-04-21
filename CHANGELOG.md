@@ -3,6 +3,29 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+
+## [1.2.0] - 2026-04-21
+
+### ✨ Added
+- 数据量检查：避免在不足数据上运行分析 (#P0)
+- 成功标准验证：每个任务验证输出有效性 (#P0)
+- 使用指南文档：完整的用户手册 (#P0)
+
+### 🔧 Improved
+- active-learning-enhanced.sh: 添加执行前检查和执行后验证
+- web-knowledge-fetch.sh: 添加配置检查和输出验证
+- README.md: 新增 User Guide 章节
+
+### 📚 Documentation
+- 何时看到效果的时间线说明
+- 最佳实践和常见问题
+- 故障排除指南
+- 成功标准详细说明
+
+### 🎯 Impact
+- 用户体验显著提升
+- 减少无效执行和资源浪费
+- 更好的错误提示和调试支持
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
