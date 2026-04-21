@@ -29,7 +29,7 @@ Evo-Cortex transforms AI agents from **passive responders** into **active learne
 ### Key Results
 
 ```
-💰 Cost Reduction:     78% ↓  (Hybrid Script+LLM execution)
+💰 Cost Reduction:     ~100% ↓ (Pure Script execution, $0.00/day)
 ⚡ Speed Improvement:  98% ↑  (<1s for 95% of tasks)
 🧠 Memory Recall:      New    (<100ms semantic search)
 📈 Learning Rate:      ∞      (Continuous evolution)
@@ -163,7 +163,7 @@ const tools = createEvoCortexTools({ agentName: 'my-agent' });
 
 ## 📊 Performance
 
-### Hybrid Execution Model
+### Pure Script Execution Model
 
 Evo-Cortex intelligently routes tasks between fast scripts and creative LLM:
 
