@@ -35,65 +35,6 @@ echo ""
 echo "🧹 清理旧的 P0 相关任务..."
 
 # 删除可能存在的旧任务
-for task_name in "code-snippet-extractor" "active-learning-enhanced" "kg-auto-update"; do
-  task_id=$(openclaw cron list 2>/dev/null | grep "$AGENT_ID-$task_name" | awk '{print $1}' | head -1)
-  if [ -n "$task_id" ]; then
-    openclaw cron remove "$task_id" 2>/dev/null || true
-    echo "   ✅ 已删除旧任务：$task_name"
-  fi
-done
-
-echo ""
-echo "📋 配置新的自动化任务..."
-echo ""
-
-CREATED=0
-SKIPPED=0
-
-# 辅助函数：创建任务
-create_p0_task() {
-  local task_name="$1"
-  local schedule="$2"
-  local message="$3"
-  
-  # 检查是否已存在
-  if openclaw cron list 2>/dev/null | grep -q "$AGENT_ID-$task_name"; then
-    echo "   ⏭️  跳过：$task_name 已存在"
-    SKIPPED=$((SKIPPED + 1))
-    return 0
-  fi
-  
-  # 创建任务
-  task_output=$(openclaw cron add \
-    --name "$AGENT_ID-$task_name" \
-    --agent "$AGENT_ID" \
-    --cron "$schedule" \
-    --message "$message" \
-    --session isolated \
-    --no-deliver 2>&1)
-  
-  if echo "$task_output" | grep -q '"id"'; then
-    echo "   ✅ 已配置：$task_name ($schedule)"
-    CREATED=$((CREATED + 1))
-  else
-    echo "   ❌ 失败：$task_name"
-    echo "      输出：$task_output"
-  fi
-}
-
-# 任务 1: 每天 5AM 运行代码片段提取
-echo "📦 任务 1: 代码片段库自动提取"
-create_p0_task \
-  "code-snippet-extractor" \
-  "0 5 * * *" \
-  "运行代码片段提取脚本：
-1. 扫描所有记忆文件中的代码块
-2. 按语言分类存储（TS/JS/Bash/SQL/Python）
-3. 生成索引文件 INDEX.md
-4. 输出统计报告
-
-无需 LLM，纯脚本执行。
-bash ~/.openclaw/extensions/evo-cortex/scripts/code-snippet-extractor.sh $AGENT_ID"
 
 # 任务 2: 每天 4AM 运行增强主动学习
 echo ""
