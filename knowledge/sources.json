@@ -1,0 +1,58 @@
+{
+  "description": "自动网络知识来源配置",
+  "lastUpdated": "2026-04-21",
+  "sources": [
+    {
+      "id": "openclaw-docs",
+      "name": "OpenClaw 官方文档",
+      "url": "https://docs.openclaw.ai",
+      "type": "documentation",
+      "tags": ["openclaw", "plugin", "development"],
+      "priority": 1,
+      "enabled": true
+    },
+    {
+      "id": "openclaw-github",
+      "name": "OpenClaw GitHub Repo",
+      "url": "https://github.com/openclaw/openclaw",
+      "type": "repository",
+      "tags": ["openclaw", "source-code", "issues"],
+      "priority": 1,
+      "enabled": true
+    },
+    {
+      "id": "evo-cortex-github",
+      "name": "Evo-Cortex GitHub Repo",
+      "url": "https://github.com/luoboask/evo-cortex",
+      "type": "repository",
+      "tags": ["evo-cortex", "plugin", "memory"],
+      "priority": 1,
+      "enabled": true
+    },
+    {
+      "id": "typescript-docs",
+      "name": "TypeScript 官方文档",
+      "url": "https://www.typescriptlang.org/docs/",
+      "type": "documentation",
+      "tags": ["typescript", "programming"],
+      "priority": 2,
+      "enabled": true
+    },
+    {
+      "id": "nodejs-docs",
+      "name": "Node.js 官方文档",
+      "url": "https://nodejs.org/docs/",
+      "type": "documentation",
+      "tags": ["nodejs", "runtime"],
+      "priority": 2,
+      "enabled": true
+    }
+  ],
+  "crawlConfig": {
+    "timeout": 30000,
+    "maxRetries": 3,
+    "concurrency": 3,
+    "cacheEnabled": true,
+    "cacheDir": "/tmp/evo-cortex-web-cache"
+  }
+}
