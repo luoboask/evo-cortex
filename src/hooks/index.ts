@@ -7,11 +7,118 @@
  * 1. 接受 agentId 参数，为每个 agent 创建独立的记忆和知识实例
  * 2. 使用统一的 Logger 系统
  * 3. 日志中包含 agentId 以便调试
+ * 4. 自动加载用户偏好 (USER_PREFERENCES.md) 并注入到上下文
  */
 
 import { MemoryHub } from "../memory/memory_hub";
 import { KnowledgeGraph } from "../knowledge/knowledge_graph";
 import type { Logger } from "../utils/logger";
+import * as fs from 'fs';
+import * as path from 'path';
+
+/**
+ * 从 USER_PREFERENCES.md 提取指定章节的已选项
+ */
+function extractCheckedItems(content: string, sectionName: string): string[] {
+  const regex = new RegExp(`## ${sectionName}[\\s\\S]*?(?=##|$)`, 'i');
+  const match = content.match(regex);
+  if (!match) return [];
+  
+  // 提取被勾选的选项（[x] 或 [X]）
+  const checked = match[0]
+    .split('\n')
+    .filter(line => /\[x\]/i.test(line))
+    .map(line => line.replace(/^[ \t-]*\[x\][ \t]*/i, '').trim())
+    .filter(Boolean);
+  
+  return checked;
+}
+
+/**
+ * 加载用户偏好文件并构建提示词注入
+ */
+async function loadUserPreferences(
+  workspaceDir: string | undefined,
+  agentId: string | undefined,
+  logger?: Logger
+): Promise<string | null> {
+  if (!workspaceDir || !agentId) {
+    return null;
+  }
+  
+  const prefFile = path.join(workspaceDir, 'USER_PREFERENCES.md');
+  
+  // 检查文件是否存在
+  if (!fs.existsSync(prefFile)) {
+    logger?.debug('User preferences file not found');
+    return null;
+  }
+  
+  try {
+    const content = fs.readFileSync(prefFile, 'utf-8');
+    
+    // 提取各个章节的已选项
+    const communicationStyle = extractCheckedItems(content, '沟通风格');
+    const codeExamples = extractCheckedItems(content, '代码示例');
+    const formatPrefs = extractCheckedItems(content, '格式偏好');
+    const techStackFrontend = extractCheckedItems(content, '前端');
+    const techStackBackend = extractCheckedItems(content, '后端');
+    const techStackDatabase = extractCheckedItems(content, '数据库');
+    const explicitLikes = extractCheckedItems(content, '明确表达过的喜好');
+    
+    // 如果没有找到任何偏好，返回 null
+    const allPrefs = [
+      ...communicationStyle,
+      ...codeExamples,
+      ...formatPrefs,
+      ...techStackFrontend,
+      ...techStackBackend,
+      ...techStackDatabase,
+      ...explicitLikes
+    ];
+    
+    if (allPrefs.length === 0) {
+      logger?.debug('No checked preferences found');
+      return null;
+    }
+    
+    // 构建简洁的提示词注入
+    let injection = '\n\n=== 用户偏好 ===\n';
+    
+    if (communicationStyle.length > 0) {
+      injection += `沟通风格：${communicationStyle.join(', ')}\n`;
+    }
+    if (codeExamples.length > 0) {
+      injection += `代码示例：${codeExamples.join(', ')}\n`;
+    }
+    if (formatPrefs.length > 0) {
+      injection += `格式偏好：${formatPrefs.join(', ')}\n`;
+    }
+    
+    const techStack = [
+      ...techStackFrontend.map(t => `前端:${t}`),
+      ...techStackBackend.map(t => `后端:${t}`),
+      ...techStackDatabase.map(t => `数据库:${t}`)
+    ];
+    if (techStack.length > 0) {
+      injection += `技术栈：${techStack.join(', ')}\n`;
+    }
+    
+    if (explicitLikes.length > 0) {
+      injection += `其他喜好：${explicitLikes.join(', ')}\n`;
+    }
+    
+    injection += '请严格遵循以上用户偏好进行回复。\n';
+    injection += '==================\n\n';
+    
+    logger?.hook('user_preferences_loaded', `Loaded ${allPrefs.length} preferences for agent ${agentId}`);
+    
+    return injection;
+  } catch (error: any) {
+    logger?.error('Failed to load user preferences', error);
+    return null;
+  }
+}
 
 /**
  * 对话前钩子：检索记忆和知识，增强上下文
@@ -26,33 +133,58 @@ export async function messageReceivedHook(
   const content = message.content || "";
   const agentTag = agentId ? `[${agentId}]` : '';
   
+  // 🔥 新增：自动加载用户偏好（无论消息类型）
+  const preferences = await loadUserPreferences(
+    (memoryHub as any).ctx?.workspaceDir,
+    agentId,
+    logger
+  );
+  
   // 判断是否需要检索增强
-  if (!shouldEnhance(content)) {
-    logger?.debug('Message does not require enhancement');
+  const needsEnhancement = shouldEnhance(content);
+  
+  if (!needsEnhancement && !preferences) {
+    logger?.debug('Message does not require enhancement and no preferences loaded');
     return {};
   }
   
-  try {
-    // 1. 检索相关记忆
-    const memories = await memoryHub.search(content, 5);
-    
-    // 2. 检索领域知识
-    const knowledge = await knowledgeGraph.search(content);
-    
-    // 3. 构建增强上下文
-    const context = buildEnhancedContext(content, memories, knowledge);
-    
-    logger?.hook('message_received', `Enhanced with ${memories.length} memories, ${knowledge.length} knowledge`);
-    
-    return {
-      system_prompt_addition: context,
-      memories: memories,
-      knowledge: knowledge
-    };
-  } catch (error) {
-    logger?.error('Enhancement failed', error);
-    return {};
+  // 构建返回结果
+  const result: Record<string, any> = {};
+  
+  // 添加用户偏好（如果有）
+  if (preferences) {
+    result.system_prompt_addition = preferences;
   }
+  
+  // 如果需要检索增强
+  if (needsEnhancement) {
+    try {
+      // 1. 检索相关记忆
+      const memories = await memoryHub.search(content, 5);
+      
+      // 2. 检索领域知识
+      const knowledge = await knowledgeGraph.search(content);
+      
+      // 3. 构建增强上下文
+      const context = buildEnhancedContext(content, memories, knowledge);
+      
+      // 合并到 system_prompt_addition
+      if (context) {
+        result.system_prompt_addition = (result.system_prompt_addition || '') + context;
+      }
+      
+      result.memories = memories;
+      result.knowledge = knowledge;
+      
+      logger?.hook('message_received', `Enhanced with ${memories.length} memories, ${knowledge.length} knowledge${preferences ? ', user preferences loaded' : ''}`);
+    } catch (error) {
+      logger?.error('Enhancement failed', error);
+    }
+  } else {
+    logger?.hook('message_received', preferences ? 'User preferences loaded' : 'No enhancement needed');
+  }
+  
+  return result;
 }
 
 /**
