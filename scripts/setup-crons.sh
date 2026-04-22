@@ -86,48 +86,7 @@ create_script_task() {
   fi
 }
 
-# 🔥 新增：创建用户偏好提取任务（阶段二）
-create_preference_task() {
-  local name="weekly-preference-extraction"
-  local cron="0 6 * * 0"  # 每周日早上 6 点
-  
-  echo "   - $name (阶段二新功能)..."
-  
-  # 使用自定义脚本而不是标准消息
-  local script_path="$EVO_CORTEX_ROOT/scripts/extract-preferences.sh"
-  
-  if openclaw cron add \
-    --cron "$cron" \
-    --agent "$AGENT_NAME" \
-    --message "[SCRIPT MODE] 运行用户偏好提取脚本
-
-执行：bash $script_path $AGENT_NAME
-
-功能:
-- 扫描最近 7 天的对话记忆
-- 自动识别偏好表达模式
-- 生成待确认列表供 review
-- 可选 LLM 增强整理
-
-输出：
-- $HOME/.openclaw/workspace-$AGENT_NAME/data/pending_preferences.txt
-
-注意：生成的偏好需要人工确认后手动添加到 USER_PREFERENCES.md" \
-    --name "$name" \
-    --session isolated \
-    --no-deliver >/dev/null 2>&1; then
-    echo "      ✅ 已创建"
-  else
-    echo "      ❌ 失败"
-  fi
-}
-    --no-deliver \
-    --session isolated >/dev/null 2>&1; then
-    echo "      ✅ 已配置（脚本模式）"
-  else
-    echo "      ⚠️ 配置失败"
-  fi
-}
+# 辅助函数结束
 
 # 核心任务
 echo "📋 配置核心任务 (basic)..."
@@ -232,21 +191,28 @@ create_script_task \
 
 无需 LLM 分析，仅统计归档。"
 
-# 🔥 新增：8. weekly-preference-extraction (每周日 06:00)
-create_preference_task
-
 # 高级任务
 echo ""
 echo "📋 配置高级任务 (full)..."
 
-# 8. session-scan (每 30 分钟)
+# 8. session-scan (每 30 分钟) - 用户偏好自动提取
 create_script_task \
   "$AGENT_NAME-session-scan" \
   "*/30 * * * *" \
-  "检测新会话：
-1. 扫描 sessions 目录
-2. 列出最近 30 分钟的会话文件
-3. 记录会话数量和大小
+  "运行会话扫描和偏好提取脚本：
+1. 扫描最近 35 分钟内的新对话记忆
+2. 自动提取用户偏好（喜欢/不喜欢/格式要求等）
+3. 写入 SQLite 数据库 (cortex.db)
+4. 同步到 Markdown (USER_PREFERENCES.md)
+5. 显示统计报告和待确认列表
+
+执行脚本：scripts/session-scan.sh
+
+输出:
+- 数据库：data/cortex.db
+- Markdown: USER_PREFERENCES.md
+
+无需 LLM 分析，纯脚本执行。"
 4. 更新会话清单文件
 5. 检测新增的会话
 6. 输出扫描摘要

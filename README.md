@@ -124,7 +124,7 @@ Nine automated tasks ensure continuous improvement:
 | Frequency | Task | Purpose |
 |-----------|------|---------|
 | Every hour | `hourly-fractal` | Fractal thinking analysis |
-| Every 30 min | `session-scan` | Memory scanning |
+| Every 30 min | `session-scan` | **User preference extraction** - Auto-detects preferences from conversations (likes/dislikes, format requirements, habits) and syncs to `USER_PREFERENCES.md` |
 | Every 5 min | `realtime-index` | Memory updates |
 | Daily 09:00 | `daily-review` | Memory review |
 | Daily 04:00 | `active-learning` | Gap detection |
