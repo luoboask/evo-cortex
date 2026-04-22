@@ -33,3 +33,7 @@ temp/
 scripts/*.bak
 scripts/*.bak2
 setup-crons-new.sh
+
+# Python cache
+__pycache__/
+*.pyc
