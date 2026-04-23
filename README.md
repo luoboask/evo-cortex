@@ -46,12 +46,33 @@ Evo-Cortex transforms AI agents from **passive responders** into **active learne
 openclaw plugins install @evo-agents/evo-cortex
 ```
 
-### 2. Setup
+### 2. Setup - One-Click Configuration
 
 ```bash
-# One-click configuration (Full mode)
-~/.openclaw/extensions/evo-cortex/scripts/quick-setup.sh <your-agent-id>
+# Full mode: 8 core tasks including auto preference extraction
+bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons.sh <your-agent-id>
+
+# Example:
+bash ~/.openclaw/extensions/evo-cortex/scripts/setup-crons.sh cortex-test-agent
 ```
+
+**What it does:**
+- ✅ Registers your agent (if needed)
+- ✅ Cleans up old/duplicate cron tasks
+- ✅ Creates 8 optimized cron tasks
+- ✅ Configures pure script mode ($0.00/day)
+
+**Core Tasks (8 total):**
+| Task | Frequency | Purpose |
+|------|-----------|---------|
+| session-scan ⭐ | Every 30 min | Auto-extract user preferences |
+| hourly-fractal | Hourly | Conversation statistics |
+| active-learning | Daily 4AM | Pattern recognition |
+| daily-review | Daily 9AM | Knowledge graph health check |
+| daily-compress | Daily 9:30AM | Memory compression |
+| weekly-compress | Sunday 3AM | Weekly archive |
+| weekly-kg-expansion | Sunday 5AM | Knowledge expansion |
+| monthly-cycle | Monthly 1st | Cleanup & stats |
 
 ### 3. Verify
 
@@ -60,10 +81,13 @@ openclaw plugins install @evo-agents/evo-cortex
 openclaw plugins list | grep evo-cortex
 
 # View active tasks
-~/.openclaw/extensions/evo-cortex/scripts/list-agent-crons.sh <your-agent-id>
+openclaw cron list | grep <your-agent-id>
+
+# Or use helper script
+bash ~/.openclaw/extensions/evo-cortex/scripts/list-agent-crons.sh <your-agent-id>
 ```
 
-**That's it!** Your agent now has a brain. 🧠
+**That's it!** Your agent now has a brain that learns and remembers. 🧠
 
 ---
 

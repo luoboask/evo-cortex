@@ -1,14 +1,25 @@
 #!/bin/bash
-# Evo-Cortex Cron 配置脚本 (统一版本)
+# Evo-Cortex Cron 配置脚本 (统一版本 - v1.2.0)
 # 
-# 这是 Evo-Cortex 的唯一推荐配置方式
+# 这是 Evo-Cortex v1.2.0+ 的唯一推荐配置方式
 # 所有任务都使用 Script 模式，零 LLM API 调用
 #
 # 特性:
-# • 纯脚本模式 - 零成本运行
+# • 纯脚本模式 - 零成本运行 ($0.00/天)
 # • 超快速度 - <1 秒/任务
 # • 高可靠性 - 不受 API 限制
 # • 简单易用 - 一条命令完成配置
+# • 智能清理 - 自动识别并删除重复任务
+#
+# 核心功能 (8 个任务):
+# 1. session-scan (每 30 分钟) - 用户偏好自动提取 ⭐ NEW!
+# 2. hourly-fractal (每小时) - 小时级统计
+# 3. active-learning (每天 4AM) - 主动学习
+# 4. daily-review (每天 9AM) - 每日审查
+# 5. daily-compress (每天 9:30AM) - 每日压缩
+# 6. weekly-compress (周日 3AM) - 周度归档
+# 7. weekly-kg-expansion (周日 5AM) - 知识扩展
+# 8. monthly-cycle (每月 1 号 2AM) - 月度清理
 #
 # 用法:
 #   bash scripts/setup-crons.sh <agent-name>
@@ -18,6 +29,7 @@
 #
 # 文档:
 #   https://github.com/luoboask/evo-cortex
+#   ~/.openclaw/extensions/evo-cortex/README.md
 
 
 set -e
@@ -50,15 +62,32 @@ if ! openclaw agents list 2>/dev/null | grep -q "^$AGENT_NAME"; then
   echo ""
 fi
 
-# 清理旧任务
+# 清理旧任务（增强版：智能识别重复任务）
 echo "🧹 清理旧的 Cron 任务..."
 count=0
+duplicate_count=0
+
+# 第一步：删除所有包含 agent 名称的旧任务
 while IFS= read -r job_id; do
   if [ -n "$job_id" ]; then
     openclaw cron remove "$job_id" >/dev/null 2>&1 && ((count++)) || true
   fi
 done < <(openclaw cron list 2>/dev/null | grep "$AGENT_NAME" | awk '{print $1}')
-echo "   ✅ 已删除 $count 个旧任务"
+
+# 第二步：删除旧格式的重复任务（格式：{task}-{agent}）
+# 这些是之前版本的遗留，命名格式不统一导致的
+while IFS= read -r job_id; do
+  if [ -n "$job_id" ]; then
+    openclaw cron remove "$job_id" >/dev/null 2>&1 && ((duplicate_count++)) || true
+  fi
+done < <(openclaw cron list 2>/dev/null | grep -E "(active-learning|daily-review|weekly-compress|monthly-cycle)-$AGENT_NAME" | awk '{print $1}')
+
+total_removed=$((count + duplicate_count))
+if [ $duplicate_count -gt 0 ]; then
+  echo "   ✅ 已删除 $count 个当前任务 + $duplicate_count 个旧格式重复任务"
+else
+  echo "   ✅ 已删除 $count 个旧任务"
+fi
 echo ""
 
 # 辅助函数：创建纯脚本任务
