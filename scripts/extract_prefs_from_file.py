@@ -40,6 +40,15 @@ def is_valid_dialogue(line: str) -> bool:
     """判断是否是有效的对话行"""
     line = line.strip()
     if not line: return False
+    
+    # 排除 Markdown 格式的行（已经是提取结果的）
+    if line.startswith('- [ ]') or line.startswith('- [x]'):
+        return False
+    
+    # 排除提取记录格式
+    if '条 - "' in line or line.startswith('> ') or line.startswith('###'):
+        return False
+    
     if line.startswith('#'): return False
     if line.startswith('//') or line.startswith('<!--'): return False
     if re.match(r'^\d+\.\s*[✅❌]', line): return False
@@ -50,6 +59,11 @@ def is_valid_dialogue(line: str) -> bool:
     if line.startswith('```'): return False
     if len(line) < 3: return False
     if len(line) > 200: return False
+    
+    # 排除纯数字或符号
+    if re.match(r'^[\d\s\-\.,]+$', line):
+        return False
+    
     return True
 
 def extract_preferences(text: str):
@@ -130,6 +144,17 @@ def main():
     added = 0
     
     for text, category, confidence in prefs:
+        # 二次过滤：排除明显的垃圾数据
+        if text.startswith('- [ ]') or text.startswith('- [x]'):
+            print(f"  ⏭️  跳过 Markdown 格式：{text[:50]}...")
+            continue
+        if '条 - "' in text or text.startswith('> '):
+            print(f"  ⏭️  跳过提取记录：{text[:50]}...")
+            continue
+        if text.count('(') > 3 or text.count('pending') > 1:
+            print(f"  ⏭️  跳过重复格式：{text[:50]}...")
+            continue
+        
         pref_id = db.add_preference(
             text=text,
             category=category,

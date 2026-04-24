@@ -154,7 +154,8 @@ main() {
     # 验证 3: 是否追加到记忆文件
     local TODAY
     TODAY=$(date +%Y-%m-%d)
-    local MEMORY_FILE="$WORKSPACE/memory/${TODAY}.md"
+    # 使用 agent 隔离的记忆目录
+    local MEMORY_FILE="$WORKSPACE/memory/$AGENT_ID/${TODAY}.md"
     
     if [ -f "$MEMORY_FILE" ] && grep -q "🌐 网络知识" "$MEMORY_FILE" 2>/dev/null; then
       log_success "✅ 已追加到记忆文件"

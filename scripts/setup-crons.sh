@@ -238,7 +238,7 @@ create_script_task \
 执行脚本：scripts/session-scan.sh
 
 输出:
-- 数据库：data/cortex.db
+- 数据库：data/$AGENT_ID/cortex.db
 - Markdown: USER_PREFERENCES.md
 
 无需 LLM 分析，纯脚本执行。"

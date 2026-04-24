@@ -29,10 +29,10 @@ class PreferencesDB:
         self.conn = self._connect()
     
     def _get_db_path(self) -> Path:
-        """获取数据库文件路径（合并后使用 cortex.db）"""
+        """获取数据库文件路径（使用 agent 隔离目录）"""
         home = Path.home()
         workspace = home / f".openclaw/workspace-{self.agent_id}"
-        return workspace / "data" / "cortex.db"
+        return workspace / "data" / self.agent_id / "cortex.db"
     
     def _connect(self) -> sqlite3.Connection:
         """建立数据库连接"""
@@ -337,22 +337,23 @@ class PreferencesDB:
             
             auto_section += f"- {checkbox} {text} ({conf_percent}%, {date_str})\n"
         
-        # 查找并替换自动部分
+        # 查找并替换自动部分（先删除旧的，再写入新的）
         if "## 📊 数据库同步的偏好" in existing_content:
             # 替换现有部分
             start_idx = existing_content.find("## 📊 数据库同步的偏好")
-            end_idx = existing_content.find("\n## ", start_idx + 1)
+            end_idx = existing_content.find("\n---", start_idx + 1)
             if end_idx == -1:
                 end_idx = len(existing_content)
             
-            new_content = existing_content[:start_idx] + auto_section + "\n---\n\n" + existing_content[end_idx:]
+            # 只保留手动编辑部分，替换自动部分
+            new_content = existing_content[:start_idx] + auto_section + "\n\n"
         else:
-            # 追加到末尾
+            # 文件只有手动模板，追加到末尾
             new_content = existing_content + "\n\n" + auto_section
         
-        # 写回文件
+        # 写回文件（覆盖模式）
         with open(md_path, 'w', encoding='utf-8') as f:
-            f.write(new_content)
+            f.write(new_content.strip() + '\n')
 
 # ────────────────────────────────────────────────
 # 便捷函数

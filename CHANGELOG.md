@@ -1,3 +1,22 @@
+## v1.2.1 (2026-04-24)
+
+### 🎯 新增功能
+- ✅ 工作记忆双重写入机制（messageReceivedHook + session-scan）
+- ✅ 真实对话过滤逻辑（过滤 Cron/工具/系统记录）
+- ✅ isRealConversation() 智能过滤函数
+- ✅ 调试日志增强
+
+### 🐛 Bug 修复
+- 🔧 修复 session_scan.py 变量作用域问题
+- 🔧 修复 USER_PREFERENCES.md 重复数据问题
+
+### 📊 改进
+- 🚀 近实时记忆写入（<100ms）
+- 🚀 只保存真实用户对话
+- 🚀 自动清理过期记忆（2 小时/30 天）
+
+---
+
 # 📋 Changelog
 
 All notable changes to this project will be documented in this file.
