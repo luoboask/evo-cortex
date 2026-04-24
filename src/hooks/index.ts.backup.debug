@@ -130,6 +130,15 @@ export async function messageReceivedHook(
   agentId?: string,
   logger?: Logger
 ): Promise<Record<string, any>> {
+  // 🔍 调试：记录接收到的消息
+  logger?.debug('Message received:', JSON.stringify({
+    hasContent: !!message.content,
+    contentType: typeof message.content,
+    contentLength: message.content?.length,
+    hasContext: !!message.context,
+    keys: Object.keys(message || {})
+  }, null, 2));
+  
   const content = message.content || "";
   const agentTag = agentId ? `[${agentId}]` : '';
   
@@ -139,6 +148,79 @@ export async function messageReceivedHook(
     agentId,
     logger
   );
+  
+  // 🆕 P1: 双向写入工作记忆（保存上一轮对话和当前问题）
+  // 过滤规则：只保存真实用户对话，过滤 Cron/脚本/工具调用
+  const dbPath = path.join(getDataDir(pluginContext), 'cortex.db');
+  const sqlite3 = require('sqlite3').verbose();
+  const db = new sqlite3.Database(dbPath);
+  
+  // 过滤函数：判断是否是真实对话
+  function isRealConversation(text: string): boolean {
+    if (!text || text.length < 5) return false;
+    
+    // ❌ 过滤 Cron 任务
+    if (text.includes('[cron:')) return false;
+    if (text.includes('[SCRIPT MODE]')) return false;
+    
+    // ❌ 过滤工具调用
+    if (text.includes('[toolCall]')) return false;
+    if (text.includes('[toolResult]')) return false;
+    
+    // ❌ 过滤系统元数据
+    if (text.includes('Sender (untrusted metadata)')) return false;
+    if (text.includes('openclaw-tui')) return false;
+    
+    // ❌ 过滤纯 JSON（工具返回）
+    const trimmed = text.trim();
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+        (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      return false;
+    }
+    
+    // ❌ 过滤过短或过长的内容
+    if (text.length > 2000) return false;
+    
+    // ✅ 通过所有过滤，认为是真实对话
+    return true;
+  }
+  
+  try {
+    // 🔍 调试：记录 content 和过滤结果
+    logger?.debug('Content preview:', content?.substring(0, 100));
+    logger?.debug('Is real conversation?', isRealConversation(content));
+    
+    // 1. 保存上一轮 AI 回复（如果有）
+    if (message.context?.lastResponse && isRealConversation(message.context.lastResponse)) {
+      const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+      db.run(`
+        INSERT INTO working_memory (session_id, content, created_at, expires_at, message_count)
+        VALUES (?, ?, datetime('now'), datetime('now', '+2 hours'), 1)
+      `, [agentId || 'unknown', `AI: ${message.context.lastResponse}`], (err: Error | null) => {
+        if (err) logger?.debug('Failed to save last response to working memory', err);
+        else logger?.hook('working_memory_written', 'Saved AI response');
+      });
+    }
+    
+    // 2. 保存当前用户问题
+    if (content && content.length > 0 && isRealConversation(content)) {
+      const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+      db.run(`
+        INSERT INTO working_memory (session_id, content, created_at, expires_at, message_count)
+        VALUES (?, ?, datetime('now'), datetime('now', '+2 hours'), 1)
+      `, [agentId || 'unknown', `User: ${content}`], (err: Error | null) => {
+        if (err) {
+          logger?.error('Failed to save user question to working memory', err);
+        } else {
+          logger?.hook('working_memory_written', `Saved user question: ${content.substring(0, 50)}`);
+        }
+      });
+    } else if (content && content.length > 0) {
+      logger?.debug('Skipped saving content (failed filter):', content.substring(0, 100));
+    }
+  } finally {
+    db.close();
+  }
   
   // 判断是否需要检索增强
   const needsEnhancement = shouldEnhance(content);
@@ -205,6 +287,25 @@ export async function messageSentHook(
       content: content,
       type: "session",
       timestamp: new Date().toISOString()
+    });
+    
+    // 🆕 P1: 实时写入工作记忆
+    const dbPath = path.join(getDataDir(pluginContext), 'cortex.db');
+    const sqlite3 = require('sqlite3').verbose();
+    const db = new sqlite3.Database(dbPath);
+    
+    const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // 2 小时后
+    
+    db.run(`
+      INSERT INTO working_memory (session_id, content, created_at, expires_at, message_count)
+      VALUES (?, ?, datetime('now'), datetime('now', '+2 hours'), 1)
+    `, [agentId || 'unknown', content], (err: Error | null) => {
+      if (err) {
+        logger?.debug('Failed to write working memory', err);
+      } else {
+        logger?.hook('working_memory_written', `Real-time write (expires: ${expiresAt})`);
+      }
+      db.close();
     });
     
     // 2. 提取概念到知识图谱
@@ -338,4 +439,133 @@ function extractConcepts(text: string): string[] {
   
   // 去重
   return [...new Set(concepts)];
+}
+
+/**
+ * 🆕 P1 优化：加载最新元规则
+ * 从 evolution 目录读取最新的元规则文件，提取可应用的建议
+ */
+async function loadLatestMetaRules(workspaceDir: string): Promise<any[]> {
+  const fs = require('fs');
+  const path = require('path');
+  
+  try {
+    const evolutionDir = path.join(workspaceDir, 'evolution');
+    if (!fs.existsSync(evolutionDir)) {
+      return [];
+    }
+    
+    // 查找最新的 meta-rules 文件
+    const files = fs.readdirSync(evolutionDir)
+      .filter(f => f.startsWith('meta-rules-') && f.endsWith('.md'))
+      .sort()
+      .reverse();
+    
+    if (files.length === 0) {
+      return [];
+    }
+    
+    const latestFile = path.join(evolutionDir, files[0]);
+    const content = fs.readFileSync(latestFile, 'utf-8');
+    
+    // 解析元规则（简单提取 ### 开头的规则）
+    const rules: any[] = [];
+    const lines = content.split('\n');
+    let currentRule: any = null;
+    
+    for (const line of lines) {
+      if (line.startsWith('### rule_')) {
+        if (currentRule) rules.push(currentRule);
+        currentRule = { id: line.replace('### ', '').trim(), description: '' };
+      } else if (currentRule && line.trim().startsWith('-')) {
+        currentRule.description += line.trim().substring(1).trim() + ' ';
+      }
+    }
+    
+    if (currentRule) rules.push(currentRule);
+    
+    return rules.slice(0, 5); // 最多返回 5 条最新规则
+  } catch (error) {
+    console.error('[loadLatestMetaRules] Error:', error);
+    return [];
+  }
+}
+
+/**
+ * 🆕 P2 优化：检索相关知识实体
+ * 根据消息内容检索相关的知识图谱实体
+ */
+async function searchRelatedKnowledge(message: string, workspaceDir: string): Promise<any[]> {
+  const fs = require('fs');
+  const path = require('path');
+  
+  try {
+    const kgDir = path.join(workspaceDir, 'knowledge');
+    const entitiesFile = path.join(kgDir, 'entities.json');
+    
+    if (!fs.existsSync(entitiesFile)) {
+      return [];
+    }
+    
+    const entities = JSON.parse(fs.readFileSync(entitiesFile, 'utf-8'));
+    const messageLower = message.toLowerCase();
+    
+    // 简单关键词匹配（可以升级为语义搜索）
+    const related = entities.filter((entity: any) => {
+      const name = entity.name?.toLowerCase() || '';
+      const desc = entity.description?.toLowerCase() || '';
+      const tags = (entity.tags || []).join(' ').toLowerCase();
+      
+      return name.includes(messageLower) || 
+             desc.includes(messageLower) || 
+             tags.split(' ').some(tag => messageLower.includes(tag));
+    });
+    
+    return related.slice(0, 3); // 最多返回 3 个相关实体
+  } catch (error) {
+    console.error('[searchRelatedKnowledge] Error:', error);
+    return [];
+  }
+}
+
+/**
+ * 🆕 P1: 加载当前会话的工作记忆
+ */
+async function loadWorkingMemory(sessionId?: string): Promise<string> {
+  try {
+    const dbPath = path.join(getDataDir(pluginContext), 'cortex.db');
+    
+    if (!fs.existsSync(dbPath)) {
+      return '';
+    }
+    
+    const db = new sqlite3.Database(dbPath);
+    
+    return new Promise((resolve) => {
+      // 查询当前会话的工作记忆
+      const query = sessionId 
+        ? 'SELECT content FROM working_memory WHERE session_id = ? ORDER BY created_at DESC LIMIT 10'
+        : 'SELECT content FROM working_memory ORDER BY created_at DESC LIMIT 10';
+      
+      db.all(query, sessionId ? [sessionId] : [], (err, rows: any[]) => {
+        db.close();
+        
+        if (err || !rows || rows.length === 0) {
+          resolve('');
+          return;
+        }
+        
+        let context = '\\n\\n💭 **工作记忆** (最近对话):\\n';
+        rows.forEach((row, i) => {
+          const preview = row.content.substring(0, 200) + '...';
+          context += `${i + 1}. ${preview}\\n`;
+        });
+        
+        resolve(context);
+      });
+    });
+  } catch (error) {
+    logger?.debug('Failed to load working memory', error);
+    return '';
+  }
 }

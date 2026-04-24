@@ -130,6 +130,11 @@ export async function messageReceivedHook(
   agentId?: string,
   logger?: Logger
 ): Promise<Record<string, any>> {
+  console.log('🔥🔥🔥 MESSAGE_RECEIVED_HOOK TRIGGERED 🔥🔥🔥');
+  console.log('Agent ID:', agentId);
+  console.log('Message content length:', message.content?.length);
+  console.log('Message keys:', Object.keys(message || {}).join(', '));
+  
   // 🔍 调试：记录接收到的消息
   logger?.debug('Message received:', JSON.stringify({
     hasContent: !!message.content,

@@ -3,10 +3,10 @@ import { Type } from "@sinclair/typebox";
 import { MemoryHub } from "./memory/memory_hub";
 import { KnowledgeGraph } from "./knowledge/knowledge_graph";
 import { EvolutionScheduler } from "./evolution/scheduler";
-import { 
-  messageReceivedHook, 
+import {
+  messageReceivedHook,
   // messageSentHook - 已移除，依赖 session-scan
-  beforeToolCallHook 
+  beforeToolCallHook
 } from "./hooks";
 import { MemoryIndexer } from "./memory/memory_indexer";
 import { SessionScanner } from "./memory/session_scanner";
@@ -398,51 +398,79 @@ const plugin = {
     });
 
     // ========== 注册钩子（动态创建实例）==========
+    
+    // 1. message_received hook - 保存对话到记忆
+    api.registerHook(
+      "message:received",
+      async (message: any, hookCtx: any) => {
+        try {
+          const pluginCtx = buildPluginContext(hookCtx || api);
+          const hookLogger = getLogger({
+            agentId: pluginCtx.agentId,
+            component: 'message_received',
+            verbose: config.verbose
+          });
 
-    api.registerHook("message_received", async (message: any, hookCtx: any) => {
-      try {
-        const pluginCtx = buildPluginContext(hookCtx || api);
-        const hookLogger = getLogger({
-          agentId: pluginCtx.agentId,
-          component: 'message_received',
-          verbose: config.verbose
-        });
+          const memoryHub = new MemoryHub(pluginCtx, config.memory);
+          const knowledgeGraph = new KnowledgeGraph(pluginCtx, config.knowledge);
 
-        const memoryHub = new MemoryHub(pluginCtx, config.memory);
-        const knowledgeGraph = new KnowledgeGraph(pluginCtx, config.knowledge);
+          const result = await messageReceivedHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
 
-        const result = await messageReceivedHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
+          if (result.system_prompt_addition) {
+            hookLogger.hook('message_received', `Enhanced with ${result.memories?.length || 0} memories, ${result.knowledge?.length || 0} knowledge`);
+          }
 
-        if (result.system_prompt_addition) {
-          hookLogger.hook('message_received', `Enhanced with ${result.memories?.length || 0} memories, ${result.knowledge?.length || 0} knowledge`);
+          return result;
+        } catch (error: any) {
+          logger.error('message_received hook failed', error);
+          return {};
         }
-
-        return result;
-      } catch (error: any) {
-        logger.error('message_received hook failed', error);
-        return {};
+      },
+      {
+        name: "evo-cortex-message-received",
+        description: "Save conversation to memory and enhance context with knowledge graph",
+        entry: {
+          hook: {
+            name: "evo-cortex-message-received",
+            description: "Save conversation to memory and enhance context with knowledge graph"
+          }
+        }
       }
-    });
+    );
 
     // messageSentHook 已移除 (2026-04-23) - 依赖 session-scan 每 30 分钟扫描
     // 原因：OpenClaw 钩子系统支持不明确，session-scan 已完全覆盖功能
 
-    api.registerHook("before_tool_call", async (toolCall: any) => {
-      try {
-        const hookLogger = getLogger({ component: 'before_tool_call' });
+    // 2. before_tool_call hook - 工具调用前检查
+    api.registerHook(
+      "message:sent",
+      async (toolCall: any) => {
+        try {
+          const hookLogger = getLogger({ component: 'before_tool_call' });
 
-        const result = await beforeToolCallHook(toolCall, hookLogger);
+          const result = await beforeToolCallHook(toolCall, hookLogger);
 
-        if (result.block) {
-          hookLogger.hook('before_tool_call', `Blocked sensitive tool: ${toolCall.name}`);
+          if (result.block) {
+            hookLogger.hook('before_tool_call', `Blocked sensitive tool: ${toolCall.name}`);
+          }
+
+          return result;
+        } catch (error: any) {
+          logger.error('before_tool_call hook failed', error);
+          return { block: false };
         }
-
-        return result;
-      } catch (error: any) {
-        logger.error('before_tool_call hook failed', error);
-        return { block: false };
+      },
+      {
+        name: "evo-cortex-before-tool-call",
+        description: "Security check before tool execution",
+        entry: {
+          hook: {
+            name: "evo-cortex-before-tool-call",
+            description: "Security check before tool execution"
+          }
+        }
       }
-    });
+    );
 
     // ========== 定时任务说明 ==========
     // Cron 需要通过 openclaw cron 命令单独配置
