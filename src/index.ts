@@ -497,7 +497,7 @@ const plugin = {
       "message:received",
       async (message: any, hookCtx: any) => {
         try {
-          const pluginCtx = buildPluginContext(hookCtx, api);
+          const pluginCtx = buildPluginContext(hookCtx || {}, api);
           const hookLogger = getLogger({
             agentId: pluginCtx.agentId,
             component: 'message_received',
@@ -535,7 +535,7 @@ const plugin = {
       "message:sent",
       async (message: any, hookCtx: any) => {
         try {
-          const pluginCtx = buildPluginContext(hookCtx, api);
+          const pluginCtx = buildPluginContext(hookCtx || {}, api);
           const hookLogger = getLogger({
             agentId: pluginCtx.agentId,
             component: 'message_sent',
