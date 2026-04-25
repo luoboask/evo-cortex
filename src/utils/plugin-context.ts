@@ -25,7 +25,10 @@ export function buildPluginContext(
   }
 ): PluginContext {
   const agentId = apiContext.agentId || "main";
-  const workspaceDir = apiContext.workspaceDir || process.cwd();
+  // 修复：确保 workspaceDir 始终是有效路径
+  const workspaceDir = apiContext.workspaceDir && apiContext.workspaceDir.length > 0
+    ? apiContext.workspaceDir
+    : (apiContext.agentDir ? path.dirname(apiContext.agentDir) : process.cwd());
   const agentDir = apiContext.agentDir;
   
   // 存储基础目录：使用绝对路径 ~/.openclaw/{type}/{agentId}
