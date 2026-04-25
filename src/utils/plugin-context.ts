@@ -16,7 +16,7 @@ export interface PluginContext {
 /**
  * 从 OpenClaw API 上下文中提取插件所需的路径信息
  * @param apiContext 当前上下文（如 hookCtx）
- * @param fallbackContext 回退上下文（如 api 对象），用于补充缺失的 workspaceDir/agentDir
+ * @param api OpenClawPluginApi 对象，用于获取 runtime.agent.resolveAgentWorkspaceDir
  */
 export function buildPluginContext(
   apiContext: {
@@ -25,20 +25,34 @@ export function buildPluginContext(
     agentDir?: string;
     config?: any;
   },
-  fallbackContext?: {
-    workspaceDir?: string;
-    agentDir?: string;
+  api?: {
+    id?: string;
+    config?: any;
+    runtime?: {
+      agent?: {
+        resolveAgentWorkspaceDir?: (cfg: any, agentId: string, env?: NodeJS.ProcessEnv) => string;
+      };
+    };
   }
 ): PluginContext {
-  const agentId = apiContext.agentId || "main";
-  // 修复：确保 workspaceDir 始终是有效路径
-  // 优先级：apiContext.workspaceDir > fallbackContext.workspaceDir > process.cwd()
-  const workspaceDir = apiContext.workspaceDir && apiContext.workspaceDir.length > 1 && apiContext.workspaceDir !== '/'
-    ? apiContext.workspaceDir
-    : (fallbackContext?.workspaceDir && fallbackContext.workspaceDir.length > 1 && fallbackContext.workspaceDir !== '/')
-      ? fallbackContext.workspaceDir
-      : process.cwd();
-  const agentDir = apiContext.agentDir || fallbackContext?.agentDir;
+  const agentId = apiContext.agentId || api?.id || "main";
+  
+  // 优先级：apiContext.workspaceDir > api.runtime.agent.resolveAgentWorkspaceDir > process.cwd()
+  let workspaceDir: string;
+  
+  if (apiContext.workspaceDir && apiContext.workspaceDir.length > 1 && apiContext.workspaceDir !== '/') {
+    workspaceDir = apiContext.workspaceDir;
+  } else if (api?.runtime?.agent?.resolveAgentWorkspaceDir && api?.config) {
+    try {
+      workspaceDir = api.runtime.agent.resolveAgentWorkspaceDir(api.config, agentId, process.env);
+    } catch {
+      workspaceDir = process.cwd();
+    }
+  } else {
+    workspaceDir = process.cwd();
+  }
+  
+  const agentDir = apiContext.agentDir;
   
   // 存储基础目录：使用绝对路径 ~/.openclaw/{type}/{agentId}
   const homeDir = process.env.HOME || process.env.USERPROFILE || "/tmp";
