@@ -32,14 +32,12 @@ export function buildPluginContext(
 ): PluginContext {
   const agentId = apiContext.agentId || "main";
   // 修复：确保 workspaceDir 始终是有效路径
-  // 优先级：apiContext.workspaceDir > fallbackContext.workspaceDir > apiContext.agentDir > fallbackContext.agentDir > process.cwd()
-  const workspaceDir = apiContext.workspaceDir && apiContext.workspaceDir.length > 0
+  // 优先级：apiContext.workspaceDir > fallbackContext.workspaceDir > process.cwd()
+  const workspaceDir = apiContext.workspaceDir && apiContext.workspaceDir.length > 1 && apiContext.workspaceDir !== '/'
     ? apiContext.workspaceDir
-    : (fallbackContext?.workspaceDir && fallbackContext.workspaceDir.length > 0)
+    : (fallbackContext?.workspaceDir && fallbackContext.workspaceDir.length > 1 && fallbackContext.workspaceDir !== '/')
       ? fallbackContext.workspaceDir
-      : (apiContext.agentDir ? path.dirname(apiContext.agentDir)
-        : (fallbackContext?.agentDir ? path.dirname(fallbackContext.agentDir)
-          : process.cwd()));
+      : process.cwd();
   const agentDir = apiContext.agentDir || fallbackContext?.agentDir;
   
   // 存储基础目录：使用绝对路径 ~/.openclaw/{type}/{agentId}
