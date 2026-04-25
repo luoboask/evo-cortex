@@ -32,13 +32,15 @@ export interface ScanResult {
   preferencesExtracted: number;
 }
 
+export interface SessionState {
+  hash: string;
+  userMessageCount: number;
+  lastScanned: string;
+  lastMessageIndex: number;
+}
+
 export interface ScanState {
-  [sessionId: string]: {
-    hash: string;
-    userMessageCount: number;
-    lastScanned: string;
-    lastMessageIndex: number;
-  };
+  [sessionId: string]: SessionState;
 }
 
 export interface WorkingMemoryEntry {
@@ -441,7 +443,7 @@ export class SessionScanner {
 
   private async processSession(
     session: SessionInfo,
-    existingState?: ScanState
+    existingState?: SessionState
   ): Promise<number> {
     try {
       const content = fs.readFileSync(session.filePath, 'utf8');

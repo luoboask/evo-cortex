@@ -27,12 +27,12 @@ export class PerformanceMonitor {
   /**
    * 开始计时
    */
-  startTimer(label: string): () => void {
+  startTimer(label: string): (metadata?: any) => void {
     const startTime = performance.now();
     this.timers.set(label, startTime);
 
     // 返回停止计时的函数
-    return () => this.stopTimer(label);
+    return (metadata?: any) => this.stopTimer(label, metadata);
   }
 
   /**

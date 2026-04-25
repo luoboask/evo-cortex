@@ -23,6 +23,7 @@ export function buildPluginContext(
     agentId?: string;
     workspaceDir?: string;
     agentDir?: string;
+    storageBaseDir?: string;
     config?: any;
   },
   api?: {
@@ -54,9 +55,9 @@ export function buildPluginContext(
   
   const agentDir = apiContext.agentDir;
   
-  // 存储基础目录：使用绝对路径 ~/.openclaw/{type}/{agentId}
+  // 存储基础目录：使用 apiContext 提供的值或默认 ~/.openclaw
   const homeDir = process.env.HOME || process.env.USERPROFILE || "/tmp";
-  const storageBaseDir = path.join(homeDir, ".openclaw");
+  const storageBaseDir = apiContext.storageBaseDir || path.join(homeDir, ".openclaw");
   
   return {
     agentId,

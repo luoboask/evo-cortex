@@ -103,7 +103,7 @@ export class MemoryHub {
           this.lastEmbeddingAttempt = Date.now();
           throw new Error('no embedding available');
         }
-      : null;
+      : undefined;
 
     this.semanticSearch = new SemanticSearch(embeddingFunc, 5000);
     // 异步加载，不阻塞构造函数
@@ -422,13 +422,13 @@ export class MemoryHub {
 
   private async persist(entry: MemoryEntry): Promise<void> {
     try {
-      const dateStr = dateStr(new Date(entry.timestamp));
+      const dateStrValue = dateStr(new Date(entry.timestamp));
       // 按类型分目录存储
       const subDir = entry.type === 'weekly' ? 'weekly' :
                      entry.type === 'monthly' ? 'monthly' : '';
       const dir = subDir ? path.join(this.storageDir, '..', subDir) : this.storageDir;
       this.ensureDirectory(dir);
-      const filePath = path.join(dir, `${dateStr}.md`);
+      const filePath = path.join(dir, `${dateStrValue}.md`);
       fs.appendFileSync(filePath, this.formatMemoryAsMarkdown(entry) + '\n', 'utf8');
     } catch (err) { console.error('[MemoryHub] Persist error:', err); }
   }

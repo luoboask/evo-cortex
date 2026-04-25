@@ -73,7 +73,7 @@ async function tryOpenAICompatible(text: string): Promise<number[] | null> {
 
     if (!resp.ok) return null;
 
-    const data = await resp.json();
+    const data: any = await resp.json();
     if (data.data?.[0]?.embedding) {
       dashscopeApiAvailable = true;
       return data.data[0].embedding;
@@ -109,7 +109,7 @@ async function tryDashScopeNative(text: string): Promise<number[] | null> {
 
     if (!resp.ok) return null;
 
-    const data = await resp.json();
+    const data: any = await resp.json();
     if (data.output?.embeddings?.[0]?.embedding) {
       dashscopeApiAvailable = true;
       return data.output.embeddings[0].embedding;

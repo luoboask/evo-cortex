@@ -173,7 +173,7 @@ export class EvolutionScheduler {
    * 检测学习机会
    */
   private async detectLearningOpportunities(): Promise<Array<{ type: string; description: string }>> {
-    const opportunities = [];
+    const opportunities: Array<{ type: string; description: string }> = [];
     
     // 简单实现：检查是否有未回答的问题
     const questionPattern = /[?？]/g;
