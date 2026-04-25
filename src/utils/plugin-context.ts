@@ -37,9 +37,6 @@ export function buildPluginContext(
 ): PluginContext {
   const agentId = apiContext.agentId || api?.id || "main";
   
-  // 调试日志：查看 api 对象的结构
-  console.log(`[evo-cortex] buildPluginContext: agentId=${agentId}, apiContext.workspaceDir=${apiContext.workspaceDir}, api.runtime.agent.resolveAgentWorkspaceDir=${typeof api?.runtime?.agent?.resolveAgentWorkspaceDir}`);
-  
   // 优先级：apiContext.workspaceDir > api.runtime.agent.resolveAgentWorkspaceDir > process.cwd()
   let workspaceDir: string;
   
@@ -48,16 +45,12 @@ export function buildPluginContext(
   } else if (api?.runtime?.agent?.resolveAgentWorkspaceDir && api?.config) {
     try {
       workspaceDir = api.runtime.agent.resolveAgentWorkspaceDir(api.config, agentId, process.env);
-      console.log(`[evo-cortex] resolveAgentWorkspaceDir returned: ${workspaceDir}`);
-    } catch (e) {
-      console.log(`[evo-cortex] resolveAgentWorkspaceDir failed: ${e}`);
+    } catch {
       workspaceDir = process.cwd();
     }
   } else {
     workspaceDir = process.cwd();
   }
-  
-  console.log(`[evo-cortex] Final workspaceDir: ${workspaceDir}`);
   
   const agentDir = apiContext.agentDir;
   
