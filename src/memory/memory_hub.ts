@@ -106,8 +106,8 @@ export class MemoryHub {
       : null;
 
     this.semanticSearch = new SemanticSearch(embeddingFunc, 5000);
-    console.log(`[MemoryHub] Initialized for ${ctx.agentId}, storage: ${this.storageDir}, retention: ${JSON.stringify(this.retention)}`);
-    this.load();
+    // 异步加载，不阻塞构造函数
+    this.load().catch(err => console.error('[MemoryHub] Load error:', err));
   }
 
   // ========== 写入 ==========
@@ -169,7 +169,6 @@ export class MemoryHub {
       }
     }
 
-    console.log(`[MemoryHub] Layered search "${query}" → ${unique.length} results (monthly:${monthly.length}, weekly:${weekly.length}, daily:${dailyResults.length})`);
     return unique.slice(0, limit);
   }
 
@@ -372,7 +371,6 @@ export class MemoryHub {
       return true;
     });
 
-    console.log(`[MemoryHub] Cleanup: daily:${dailyRemoved} weekly:${weeklyRemoved} monthly:${monthlyRemoved} remaining:${this.memories.length}`);
     return { dailyRemoved, weeklyRemoved, monthlyRemoved, totalRemaining: this.memories.length };
   }
 
@@ -435,10 +433,9 @@ export class MemoryHub {
     } catch (err) { console.error('[MemoryHub] Persist error:', err); }
   }
 
-  private load(): void {
+  private async load(): Promise<void> {
     try {
       if (!fs.existsSync(this.storageDir)) {
-        console.log('[MemoryHub] No storage, starting fresh');
         return;
       }
 
@@ -465,7 +462,6 @@ export class MemoryHub {
         trainTfIdf(this.ctx, this.memories.map(m => ({ id: m.id!, content: m.content })));
       }
       for (const entry of this.memories) this.addToSemanticSearch(entry).catch(() => {});
-      console.log(`[MemoryHub] Loaded ${this.memories.length} memories (${getEmbeddingLevel()})`);
     } catch (err) { console.error('[MemoryHub] Load error:', err); }
   }
 

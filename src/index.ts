@@ -477,8 +477,21 @@ const plugin = {
       };
     });
 
-    // ========== 注册钩子（动态创建实例）==========
-    
+    // ========== 实例缓存（避免每次 hook 都重建）==========
+    const hubCache = new Map<string, { memoryHub: MemoryHub; knowledgeGraph: KnowledgeGraph }>();
+
+    function getOrCreateHub(agentId: string, pluginCtx: any): { memoryHub: MemoryHub; knowledgeGraph: KnowledgeGraph } {
+      let cached = hubCache.get(agentId);
+      if (!cached) {
+        cached = {
+          memoryHub: new MemoryHub(pluginCtx, config.memory, config.embedding, config.retention),
+          knowledgeGraph: new KnowledgeGraph(pluginCtx, config.knowledge)
+        };
+        hubCache.set(agentId, cached);
+      }
+      return cached;
+    }
+
     // 1. message_received hook - 保存对话到记忆
     api.registerHook(
       "message:received",
@@ -491,8 +504,7 @@ const plugin = {
             verbose: config.verbose
           });
 
-          const memoryHub = new MemoryHub(pluginCtx, config.memory, config.embedding, config.retention);
-          const knowledgeGraph = new KnowledgeGraph(pluginCtx, config.knowledge);
+          const { memoryHub, knowledgeGraph } = getOrCreateHub(pluginCtx.agentId, pluginCtx);
 
           const result = await messageReceivedHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
 
@@ -529,8 +541,7 @@ const plugin = {
             component: 'message_sent',
             verbose: config.verbose
           });
-          const memoryHub = new MemoryHub(pluginCtx, config.memory, config.embedding, config.retention);
-          const knowledgeGraph = new KnowledgeGraph(pluginCtx, config.knowledge);
+          const { memoryHub, knowledgeGraph } = getOrCreateHub(pluginCtx.agentId, pluginCtx);
 
           const result = await messageSentHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
           hookLogger.hook('message_sent', 'Memory stored after message sent');

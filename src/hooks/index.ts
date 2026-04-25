@@ -3,11 +3,13 @@
  * 
  * 实现对话前、对话后、工具调用前的增强逻辑
  * 
- * 改进：
- * 1. 接受 agentId 参数，为每个 agent 创建独立的记忆和知识实例
- * 2. 使用统一的 Logger 系统
- * 3. 日志中包含 agentId 以便调试
- * 4. 自动加载用户偏好 (USER_PREFERENCES.md) 并注入到上下文
+ * v1.3.0 改进：
+ * 1. sqlite3 可选加载（未安装时优雅降级）
+ * 2. 移除所有 console.log 调试代码
+ * 3. 缩小 shouldEnhance 触发词范围
+ * 4. 禁用 extractConcepts（启发式噪声太多）
+ * 5. 修复 db.close() 竞态条件
+ * 6. 移除未使用的函数（loadLatestMetaRules, searchRelatedKnowledge, loadWorkingMemory）
  */
 
 import { MemoryHub } from "../memory/memory_hub";
@@ -24,7 +26,6 @@ function extractCheckedItems(content: string, sectionName: string): string[] {
   const match = content.match(regex);
   if (!match) return [];
   
-  // 提取被勾选的选项（[x] 或 [X]）
   const checked = match[0]
     .split('\n')
     .filter(line => /\[x\]/i.test(line))
@@ -48,7 +49,6 @@ async function loadUserPreferences(
   
   const prefFile = path.join(workspaceDir, 'USER_PREFERENCES.md');
   
-  // 检查文件是否存在
   if (!fs.existsSync(prefFile)) {
     logger?.debug('User preferences file not found');
     return null;
@@ -57,7 +57,6 @@ async function loadUserPreferences(
   try {
     const content = fs.readFileSync(prefFile, 'utf-8');
     
-    // 提取各个章节的已选项
     const communicationStyle = extractCheckedItems(content, '沟通风格');
     const codeExamples = extractCheckedItems(content, '代码示例');
     const formatPrefs = extractCheckedItems(content, '格式偏好');
@@ -66,7 +65,6 @@ async function loadUserPreferences(
     const techStackDatabase = extractCheckedItems(content, '数据库');
     const explicitLikes = extractCheckedItems(content, '明确表达过的喜好');
     
-    // 如果没有找到任何偏好，返回 null
     const allPrefs = [
       ...communicationStyle,
       ...codeExamples,
@@ -82,7 +80,6 @@ async function loadUserPreferences(
       return null;
     }
     
-    // 构建简洁的提示词注入
     let injection = '\n\n=== 用户偏好 ===\n';
     
     if (communicationStyle.length > 0) {
@@ -120,6 +117,65 @@ async function loadUserPreferences(
   }
 }
 
+/** 安全加载 sqlite3，未安装时返回 null */
+function getSqlite3(): any {
+  try {
+    return require('sqlite3').verbose();
+  } catch {
+    return null;
+  }
+}
+
+/** 安全写入工作记忆（sqlite3 可选，修复竞态条件） */
+function safeWriteWorkingMemory(
+  dbPath: string,
+  agentId: string,
+  content: string,
+  logger?: Logger
+): void {
+  const sqlite3 = getSqlite3();
+  if (!sqlite3) {
+    logger?.debug('sqlite3 not available, skipping working memory write');
+    return;
+  }
+  
+  let db: any;
+  try {
+    db = new sqlite3.Database(dbPath);
+    db.run(
+      `INSERT INTO working_memory (session_id, content, created_at, expires_at, message_count)
+       VALUES (?, ?, datetime('now'), datetime('now', '+2 hours'), 1)`,
+      [agentId || 'unknown', content],
+      (err: Error | null) => {
+        if (err) logger?.debug('Failed to write working memory', err);
+        else logger?.hook('working_memory_written', `Saved: ${content.substring(0, 50)}`);
+        try { db.close(); } catch { /* ignore double-close */ }
+      }
+    );
+  } catch (err) {
+    logger?.debug('Failed to open working memory db', err);
+    if (db) { try { db.close(); } catch { /* ignore */ } }
+  }
+}
+
+/** 过滤函数：判断是否是真实对话 */
+function isRealConversation(text: string): boolean {
+  if (!text || text.length < 5) return false;
+  if (text.includes('[cron:')) return false;
+  if (text.includes('[SCRIPT MODE]')) return false;
+  if (text.includes('[toolCall]')) return false;
+  if (text.includes('[toolResult]')) return false;
+  if (text.includes('Sender (untrusted metadata)')) return false;
+  if (text.includes('openclaw-tui')) return false;
+  const trimmed = text.trim();
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    return false;
+  }
+  if (text.length > 2000) return false;
+  return true;
+}
+
 /**
  * 对话前钩子：检索记忆和知识，增强上下文
  */
@@ -130,101 +186,27 @@ export async function messageReceivedHook(
   agentId?: string,
   logger?: Logger
 ): Promise<Record<string, any>> {
-  console.log('🔥🔥🔥 MESSAGE_RECEIVED_HOOK TRIGGERED 🔥🔥🔥');
-  console.log('Agent ID:', agentId);
-  console.log('Message content length:', message.content?.length);
-  console.log('Message keys:', Object.keys(message || {}).join(', '));
-  
-  // 🔍 调试：记录接收到的消息
-  logger?.debug('Message received:', JSON.stringify({
-    hasContent: !!message.content,
-    contentType: typeof message.content,
-    contentLength: message.content?.length,
-    hasContext: !!message.context,
-    keys: Object.keys(message || {})
-  }, null, 2));
-  
   const content = message.content || "";
-  const agentTag = agentId ? `[${agentId}]` : '';
   
-  // 🔥 新增：自动加载用户偏好（无论消息类型）
+  // 自动加载用户偏好
   const preferences = await loadUserPreferences(
     (memoryHub as any).ctx?.workspaceDir,
     agentId,
     logger
   );
   
-  // 🆕 P1: 双向写入工作记忆（保存上一轮对话和当前问题）
-  // 过滤规则：只保存真实用户对话，过滤 Cron/脚本/工具调用
-  const dbPath = path.join((memoryHub as any).ctx?.workspaceDir, 'data', agentId || 'default', 'cortex.db');
-  const sqlite3 = require('sqlite3').verbose();
-  const db = new sqlite3.Database(dbPath);
+  // 双向写入工作记忆（sqlite3 可选）
+  const workspaceDir = (memoryHub as any).ctx?.workspaceDir || '';
+  const dbPath = path.join(workspaceDir, 'data', agentId || 'default', 'cortex.db');
   
-  // 过滤函数：判断是否是真实对话
-  function isRealConversation(text: string): boolean {
-    if (!text || text.length < 5) return false;
-    
-    // ❌ 过滤 Cron 任务
-    if (text.includes('[cron:')) return false;
-    if (text.includes('[SCRIPT MODE]')) return false;
-    
-    // ❌ 过滤工具调用
-    if (text.includes('[toolCall]')) return false;
-    if (text.includes('[toolResult]')) return false;
-    
-    // ❌ 过滤系统元数据
-    if (text.includes('Sender (untrusted metadata)')) return false;
-    if (text.includes('openclaw-tui')) return false;
-    
-    // ❌ 过滤纯 JSON（工具返回）
-    const trimmed = text.trim();
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-        (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      return false;
-    }
-    
-    // ❌ 过滤过短或过长的内容
-    if (text.length > 2000) return false;
-    
-    // ✅ 通过所有过滤，认为是真实对话
-    return true;
+  // 1. 保存上一轮 AI 回复（如果有）
+  if (message.context?.lastResponse && isRealConversation(message.context.lastResponse)) {
+    safeWriteWorkingMemory(dbPath, agentId || 'unknown', `AI: ${message.context.lastResponse}`, logger);
   }
   
-  try {
-    // 🔍 调试：记录 content 和过滤结果
-    logger?.debug('Content preview:', content?.substring(0, 100));
-    logger?.debug('Is real conversation?', isRealConversation(content));
-    
-    // 1. 保存上一轮 AI 回复（如果有）
-    if (message.context?.lastResponse && isRealConversation(message.context.lastResponse)) {
-      const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-      db.run(`
-        INSERT INTO working_memory (session_id, content, created_at, expires_at, message_count)
-        VALUES (?, ?, datetime('now'), datetime('now', '+2 hours'), 1)
-      `, [agentId || 'unknown', `AI: ${message.context.lastResponse}`], (err: Error | null) => {
-        if (err) logger?.debug('Failed to save last response to working memory', err);
-        else logger?.hook('working_memory_written', 'Saved AI response');
-      });
-    }
-    
-    // 2. 保存当前用户问题
-    if (content && content.length > 0 && isRealConversation(content)) {
-      const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-      db.run(`
-        INSERT INTO working_memory (session_id, content, created_at, expires_at, message_count)
-        VALUES (?, ?, datetime('now'), datetime('now', '+2 hours'), 1)
-      `, [agentId || 'unknown', `User: ${content}`], (err: Error | null) => {
-        if (err) {
-          logger?.error('Failed to save user question to working memory', err);
-        } else {
-          logger?.hook('working_memory_written', `Saved user question: ${content.substring(0, 50)}`);
-        }
-      });
-    } else if (content && content.length > 0) {
-      logger?.debug('Skipped saving content (failed filter):', content.substring(0, 100));
-    }
-  } finally {
-    db.close();
+  // 2. 保存当前用户问题
+  if (content && content.length > 0 && isRealConversation(content)) {
+    safeWriteWorkingMemory(dbPath, agentId || 'unknown', `User: ${content}`, logger);
   }
   
   // 判断是否需要检索增强
@@ -238,24 +220,16 @@ export async function messageReceivedHook(
   // 构建返回结果
   const result: Record<string, any> = {};
   
-  // 添加用户偏好（如果有）
   if (preferences) {
     result.system_prompt_addition = preferences;
   }
   
-  // 如果需要检索增强
   if (needsEnhancement) {
     try {
-      // 1. 检索相关记忆
       const memories = await memoryHub.search(content, 5);
-      
-      // 2. 检索领域知识
       const knowledge = await knowledgeGraph.search(content);
-      
-      // 3. 构建增强上下文
       const context = buildEnhancedContext(content, memories, knowledge);
       
-      // 合并到 system_prompt_addition
       if (context) {
         result.system_prompt_addition = (result.system_prompt_addition || '') + context;
       }
@@ -294,39 +268,15 @@ export async function messageSentHook(
       timestamp: new Date().toISOString()
     });
     
-    // 🆕 P1: 实时写入工作记忆
-    const dbPath = path.join((memoryHub as any).ctx?.workspaceDir, 'data', agentId || 'default', 'cortex.db');
-    const sqlite3 = require('sqlite3').verbose();
-    const db = new sqlite3.Database(dbPath);
+    // 实时写入工作记忆（sqlite3 可选）
+    const workspaceDir = (memoryHub as any).ctx?.workspaceDir || '';
+    const dbPath = path.join(workspaceDir, 'data', agentId || 'default', 'cortex.db');
+    safeWriteWorkingMemory(dbPath, agentId || 'unknown', content, logger);
     
-    const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // 2 小时后
+    // 2. 提取概念到知识图谱（已禁用：启发式规则噪声太多）
+    // const concepts = extractConcepts(content);
     
-    db.run(`
-      INSERT INTO working_memory (session_id, content, created_at, expires_at, message_count)
-      VALUES (?, ?, datetime('now'), datetime('now', '+2 hours'), 1)
-    `, [agentId || 'unknown', content], (err: Error | null) => {
-      if (err) {
-        logger?.debug('Failed to write working memory', err);
-      } else {
-        logger?.hook('working_memory_written', `Real-time write (expires: ${expiresAt})`);
-      }
-      db.close();
-    });
-    
-    // 2. 提取概念到知识图谱
-    const concepts = extractConcepts(content);
-    if (concepts.length > 0) {
-      await knowledgeGraph.addEntities(
-        concepts.map(name => ({
-          name,
-          type: "concept",
-          createdAt: new Date().toISOString()
-        }))
-      );
-      logger?.hook('message_sent', `Stored memory, extracted ${concepts.length} concepts`);
-    } else {
-      logger?.hook('message_sent', 'Stored memory');
-    }
+    logger?.hook('message_sent', 'Stored memory');
     
     return {};
   } catch (error) {
@@ -344,11 +294,9 @@ export async function beforeToolCallHook(
 ): Promise<Record<string, any>> {
   const toolName = toolCall.name || "";
   
-  // 敏感工具检查
   const sensitiveTools = ["delete_file", "exec", "send_email", "system.run"];
   if (sensitiveTools.includes(toolName)) {
     logger?.hook('before_tool_call', `Sensitive tool detected: ${toolName}`);
-    // 可以添加额外的安全检查或日志
   }
   
   return { block: false };
@@ -357,25 +305,20 @@ export async function beforeToolCallHook(
 // ========== 辅助函数 ==========
 
 /**
- * 判断是否需要增强
+ * 判断是否需要检索增强
+ * v1.3.0: 缩小触发词范围，只在明确询问历史/记忆时触发
  */
 function shouldEnhance(message: string): boolean {
-  // 触发词：历史查询、配置询问、复杂问题
   const triggers = [
-    // 中文触发词
-    "之前", "记得", "如何", "怎么", "为什么", "什么", "哪里", "何时", 
-    "谁", "哪些", "多少", "怎样", "干嘛", "干吗",
-    // 英文触发词
-    "history", "remember", "how", "why", "what", "where", "when", 
-    "who", "which", "previous", "before"
+    // 中文：明确的历史查询
+    "之前做过", "之前说过", "还记得", "记得吗", "上次", "以前",
+    // 英文：明确的历史查询
+    "history", "remember", "previous", "before", "last time"
   ];
   
-  const hasTrigger = triggers.some(t => 
+  return triggers.some(t => 
     message.toLowerCase().includes(t.toLowerCase())
   );
-  const isLongMessage = message.length > 20;
-  
-  return hasTrigger || isLongMessage;
 }
 
 /**
@@ -388,7 +331,6 @@ function buildEnhancedContext(
 ): string {
   let context = "📚 相关信息:\n\n";
   
-  // 添加历史记忆
   if (memories.length > 0) {
     context += "💭 历史记忆:\n";
     memories.slice(0, 3).forEach((m, i) => {
@@ -398,7 +340,6 @@ function buildEnhancedContext(
     context += "\n";
   }
   
-  // 添加领域知识
   if (knowledge.length > 0) {
     context += "📖 领域知识:\n";
     knowledge.slice(0, 3).forEach((k, i) => {
@@ -413,165 +354,9 @@ function buildEnhancedContext(
 }
 
 /**
- * 提取概念（简单实现）
+ * 提取概念（已禁用：启发式规则噪声太多）
+ * TODO: 使用 NLP 或 AI 模型提取概念
  */
-function extractConcepts(text: string): string[] {
-  // TODO: 使用 NLP 或 AI 模型提取概念
-  // 当前简单实现：提取可能的技术术语
-  
-  const concepts: string[] = [];
-  
-  // 匹配大写字母开头的词组（英文术语）
-  const englishPattern = /\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g;
-  const englishMatches = text.match(englishPattern);
-  if (englishMatches) {
-    concepts.push(...englishMatches);
-  }
-  
-  // 匹配中文术语（简单启发式）
-  const chinesePattern = /[\u4e00-\u9fa5]{2,}/g;
-  const chineseMatches = text.match(chinesePattern);
-  if (chineseMatches) {
-    // 过滤常见词，保留可能的术语
-    const stopWords = [
-      "我们", "他们", "这个", "那个", "什么", "怎么", 
-      "可以", "需要", "应该", "可能", "一个", "一些",
-      "如果", "那么", "但是", "所以", "因为", "虽然"
-    ];
-    const filtered = chineseMatches.filter(c => !stopWords.includes(c));
-    concepts.push(...filtered.slice(0, 5));
-  }
-  
-  // 去重
-  return [...new Set(concepts)];
-}
-
-/**
- * 🆕 P1 优化：加载最新元规则
- * 从 evolution 目录读取最新的元规则文件，提取可应用的建议
- */
-async function loadLatestMetaRules(workspaceDir: string): Promise<any[]> {
-  const fs = require('fs');
-  const path = require('path');
-  
-  try {
-    const evolutionDir = path.join(workspaceDir, 'evolution');
-    if (!fs.existsSync(evolutionDir)) {
-      return [];
-    }
-    
-    // 查找最新的 meta-rules 文件
-    const files = fs.readdirSync(evolutionDir)
-      .filter(f => f.startsWith('meta-rules-') && f.endsWith('.md'))
-      .sort()
-      .reverse();
-    
-    if (files.length === 0) {
-      return [];
-    }
-    
-    const latestFile = path.join(evolutionDir, files[0]);
-    const content = fs.readFileSync(latestFile, 'utf-8');
-    
-    // 解析元规则（简单提取 ### 开头的规则）
-    const rules: any[] = [];
-    const lines = content.split('\n');
-    let currentRule: any = null;
-    
-    for (const line of lines) {
-      if (line.startsWith('### rule_')) {
-        if (currentRule) rules.push(currentRule);
-        currentRule = { id: line.replace('### ', '').trim(), description: '' };
-      } else if (currentRule && line.trim().startsWith('-')) {
-        currentRule.description += line.trim().substring(1).trim() + ' ';
-      }
-    }
-    
-    if (currentRule) rules.push(currentRule);
-    
-    return rules.slice(0, 5); // 最多返回 5 条最新规则
-  } catch (error) {
-    console.error('[loadLatestMetaRules] Error:', error);
-    return [];
-  }
-}
-
-/**
- * 🆕 P2 优化：检索相关知识实体
- * 根据消息内容检索相关的知识图谱实体
- */
-async function searchRelatedKnowledge(message: string, workspaceDir: string): Promise<any[]> {
-  const fs = require('fs');
-  const path = require('path');
-  
-  try {
-    const kgDir = path.join(workspaceDir, 'knowledge');
-    const entitiesFile = path.join(kgDir, 'entities.json');
-    
-    if (!fs.existsSync(entitiesFile)) {
-      return [];
-    }
-    
-    const entities = JSON.parse(fs.readFileSync(entitiesFile, 'utf-8'));
-    const messageLower = message.toLowerCase();
-    
-    // 简单关键词匹配（可以升级为语义搜索）
-    const related = entities.filter((entity: any) => {
-      const name = entity.name?.toLowerCase() || '';
-      const desc = entity.description?.toLowerCase() || '';
-      const tags = (entity.tags || []).join(' ').toLowerCase();
-      
-      return name.includes(messageLower) || 
-             desc.includes(messageLower) || 
-             tags.split(' ').some(tag => messageLower.includes(tag));
-    });
-    
-    return related.slice(0, 3); // 最多返回 3 个相关实体
-  } catch (error) {
-    console.error('[searchRelatedKnowledge] Error:', error);
-    return [];
-  }
-}
-
-/**
- * 🆕 P1: 加载当前会话的工作记忆
- */
-async function loadWorkingMemory(sessionId?: string, workspaceDir?: string, agentId?: string): Promise<string> {
-  try {
-    if (!workspaceDir || !agentId) return '';
-    const dbPath = path.join(workspaceDir, 'data', agentId, 'cortex.db');
-    
-    if (!fs.existsSync(dbPath)) {
-      return '';
-    }
-    
-    const db = new sqlite3.Database(dbPath);
-    
-    return new Promise((resolve) => {
-      // 查询当前会话的工作记忆
-      const query = sessionId 
-        ? 'SELECT content FROM working_memory WHERE session_id = ? ORDER BY created_at DESC LIMIT 10'
-        : 'SELECT content FROM working_memory ORDER BY created_at DESC LIMIT 10';
-      
-      db.all(query, sessionId ? [sessionId] : [], (err, rows: any[]) => {
-        db.close();
-        
-        if (err || !rows || rows.length === 0) {
-          resolve('');
-          return;
-        }
-        
-        let context = '\\n\\n💭 **工作记忆** (最近对话):\\n';
-        rows.forEach((row, i) => {
-          const preview = row.content.substring(0, 200) + '...';
-          context += `${i + 1}. ${preview}\\n`;
-        });
-        
-        resolve(context);
-      });
-    });
-  } catch (error) {
-    logger?.debug('Failed to load working memory', error);
-    return '';
-  }
+function extractConcepts(_text: string): string[] {
+  return [];
 }
