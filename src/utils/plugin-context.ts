@@ -15,6 +15,8 @@ export interface PluginContext {
 
 /**
  * 从 OpenClaw API 上下文中提取插件所需的路径信息
+ * @param apiContext 当前上下文（如 hookCtx）
+ * @param fallbackContext 回退上下文（如 api 对象），用于补充缺失的 workspaceDir/agentDir
  */
 export function buildPluginContext(
   apiContext: {
@@ -22,14 +24,23 @@ export function buildPluginContext(
     workspaceDir?: string;
     agentDir?: string;
     config?: any;
+  },
+  fallbackContext?: {
+    workspaceDir?: string;
+    agentDir?: string;
   }
 ): PluginContext {
   const agentId = apiContext.agentId || "main";
   // 修复：确保 workspaceDir 始终是有效路径
+  // 优先级：apiContext.workspaceDir > fallbackContext.workspaceDir > apiContext.agentDir > fallbackContext.agentDir > process.cwd()
   const workspaceDir = apiContext.workspaceDir && apiContext.workspaceDir.length > 0
     ? apiContext.workspaceDir
-    : (apiContext.agentDir ? path.dirname(apiContext.agentDir) : process.cwd());
-  const agentDir = apiContext.agentDir;
+    : (fallbackContext?.workspaceDir && fallbackContext.workspaceDir.length > 0)
+      ? fallbackContext.workspaceDir
+      : (apiContext.agentDir ? path.dirname(apiContext.agentDir)
+        : (fallbackContext?.agentDir ? path.dirname(fallbackContext.agentDir)
+          : process.cwd()));
+  const agentDir = apiContext.agentDir || fallbackContext?.agentDir;
   
   // 存储基础目录：使用绝对路径 ~/.openclaw/{type}/{agentId}
   const homeDir = process.env.HOME || process.env.USERPROFILE || "/tmp";
