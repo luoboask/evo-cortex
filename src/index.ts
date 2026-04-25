@@ -5,7 +5,7 @@ import { KnowledgeGraph } from "./knowledge/knowledge_graph";
 import { EvolutionScheduler } from "./evolution/scheduler";
 import {
   messageReceivedHook,
-  // messageSentHook - 已移除，依赖 session-scan
+  messageSentHook,
   beforeToolCallHook
 } from "./hooks";
 import { MemoryIndexer } from "./memory/memory_indexer";
@@ -14,6 +14,7 @@ import { WebCrawler } from "./knowledge/web_crawler";
 import { buildPluginContext, getMemoryStorageDir, getKnowledgeStorageDir, getDataDir } from "./utils/plugin-context";
 import { getLogger } from "./utils/logger";
 import { validateConfig, getConfigSummary } from "./utils/config-validator";
+import type { RetentionPolicy } from "./utils/config-validator";
 import { getCache } from "./utils/cache";
 import { runHealthCheck, formatHealthReport } from "./tools/health-check";
 import { checkAndPrompt, markAsConfigured, isCronConfigured } from "./utils/cron-auto-setup";
@@ -43,6 +44,15 @@ const plugin = {
           auto_store: { type: "boolean", description: "是否自动存储对话", default: true }
         }
       },
+      retention: {
+        type: "object",
+        description: "记忆保留策略 - 分层清理",
+        properties: {
+          daily: { type: "number", description: "日记忆保留天数", default: 14 },
+          weekly: { type: "number", description: "周摘要保留周数", default: 8 },
+          monthly: { type: "number", description: "月概述保留月数", default: 2 }
+        }
+      },
       evolution: {
         type: "object",
         description: "进化系统配置",
@@ -58,6 +68,25 @@ const plugin = {
         properties: {
           enabled: { type: "boolean", default: true },
           auto_expand: { type: "boolean", description: "是否自动扩展知识图谱", default: true }
+        }
+      },
+      embedding: {
+        type: "object",
+        description: "语义搜索配置 - 控制记忆和知识搜索的搜索模式",
+        properties: {
+          enabled: { type: "boolean", description: "是否启用语义搜索", default: true },
+          mode: { 
+            type: "string", 
+            description: "搜索模式: auto=自动降级 | semantic=仅语义 | keyword=仅关键词",
+            default: "auto",
+            enum: ["auto", "semantic", "keyword"]
+          },
+          fallback: { 
+            type: "string", 
+            description: "API 不可用时的降级策略: tfidf=本地TF-IDF | keyword=关键词匹配",
+            default: "tfidf",
+            enum: ["tfidf", "keyword"]
+          }
         }
       },
       verbose: {
@@ -121,7 +150,7 @@ const plugin = {
         component: 'search_memory',
         verbose: config.verbose
       });
-      const memoryHub = new MemoryHub(pluginCtx, config.memory || {});
+      const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
 
       return {
         name: "search_memory",
@@ -252,7 +281,7 @@ const plugin = {
       };
     });
 
-    // 4. 会话扫描工具
+    // 10. 会话扫描工具
     api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx);
       const toolLogger = getLogger({
@@ -302,7 +331,58 @@ const plugin = {
       };
     });
 
-    // 5. 网络爬取工具（不需要 agent 上下文）
+    // 7. 记忆压缩工具
+    api.registerTool((ctx) => {
+      const pluginCtx = buildPluginContext(ctx);
+      const toolLogger = getLogger({ agentId: pluginCtx.agentId, component: 'memory_compress', verbose: config.verbose });
+      const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
+
+      return {
+        name: "memory_compress",
+        description: "执行记忆压缩（daily/weekly/monthly）",
+        parameters: Type.Object({
+          granularity: Type.String({ description: "压缩粒度", enum: ["daily", "weekly", "monthly"] })
+        }),
+        async execute(_id: string, params: any) {
+          try {
+            toolLogger.debug(`Compressing: ${params.granularity}`);
+            let report;
+            if (params.granularity === 'daily') report = await memoryHub.compressDaily();
+            else if (params.granularity === 'weekly') report = await memoryHub.compressWeekly();
+            else report = await memoryHub.compressMonthly();
+            return { content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }] };
+          } catch (error: any) {
+            toolLogger.error('Compression failed', error);
+            return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
+    // 8. 记忆清理工具
+    api.registerTool((ctx) => {
+      const pluginCtx = buildPluginContext(ctx);
+      const toolLogger = getLogger({ agentId: pluginCtx.agentId, component: 'memory_cleanup', verbose: config.verbose });
+      const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
+
+      return {
+        name: "memory_cleanup",
+        description: "按保留策略清理过期记忆（14d/8w/2m）",
+        parameters: Type.Object({}),
+        async execute(_id: string) {
+          try {
+            const report = memoryHub.cleanup();
+            toolLogger.info(`Cleanup: ${report.dailyRemoved}d ${report.weeklyRemoved}w ${report.monthlyRemoved}m removed`);
+            return { content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }] };
+          } catch (error: any) {
+            toolLogger.error('Cleanup failed', error);
+            return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
+    // 9. 网络爬取工具（不需要 agent 上下文）
     api.registerTool(() => {
       const toolLogger = getLogger({
         component: 'crawl_web',
@@ -341,7 +421,7 @@ const plugin = {
       };
     });
 
-    // 6. 健康检查工具
+    // 11. 健康检查工具
     api.registerTool((ctx) => {
       const pluginCtx = buildPluginContext(ctx);
       const toolLogger = getLogger({
@@ -411,7 +491,7 @@ const plugin = {
             verbose: config.verbose
           });
 
-          const memoryHub = new MemoryHub(pluginCtx, config.memory);
+          const memoryHub = new MemoryHub(pluginCtx, config.memory, config.embedding, config.retention);
           const knowledgeGraph = new KnowledgeGraph(pluginCtx, config.knowledge);
 
           const result = await messageReceivedHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
@@ -438,12 +518,44 @@ const plugin = {
       }
     );
 
-    // messageSentHook 已移除 (2026-04-23) - 依赖 session-scan 每 30 分钟扫描
-    // 原因：OpenClaw 钩子系统支持不明确，session-scan 已完全覆盖功能
-
-    // 2. before_tool_call hook - 工具调用前检查
+    // 2. message:sent hook - 消息发出后存储记忆、提取概念
     api.registerHook(
       "message:sent",
+      async (message: any, hookCtx: any) => {
+        try {
+          const pluginCtx = buildPluginContext(hookCtx || api);
+          const hookLogger = getLogger({
+            agentId: pluginCtx.agentId,
+            component: 'message_sent',
+            verbose: config.verbose
+          });
+          const memoryHub = new MemoryHub(pluginCtx, config.memory, config.embedding, config.retention);
+          const knowledgeGraph = new KnowledgeGraph(pluginCtx, config.knowledge);
+
+          const result = await messageSentHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
+          hookLogger.hook('message_sent', 'Memory stored after message sent');
+
+          return result;
+        } catch (error: any) {
+          logger.error('message_sent hook failed', error);
+          return {};
+        }
+      },
+      {
+        name: "evo-cortex-message-sent",
+        description: "Store memory and extract concepts after message sent",
+        entry: {
+          hook: {
+            name: "evo-cortex-message-sent",
+            description: "Store memory and extract concepts after message sent"
+          }
+        }
+      }
+    );
+
+    // 3. before:tool_call hook - 工具调用前安全检查
+    api.registerHook(
+      "before:tool_call",
       async (toolCall: any) => {
         try {
           const hookLogger = getLogger({ component: 'before_tool_call' });

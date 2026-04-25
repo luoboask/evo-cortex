@@ -156,7 +156,7 @@ export async function messageReceivedHook(
   
   // 🆕 P1: 双向写入工作记忆（保存上一轮对话和当前问题）
   // 过滤规则：只保存真实用户对话，过滤 Cron/脚本/工具调用
-  const dbPath = path.join(getDataDir(pluginContext), 'cortex.db');
+  const dbPath = path.join((memoryHub as any).ctx?.workspaceDir, 'data', agentId || 'default', 'cortex.db');
   const sqlite3 = require('sqlite3').verbose();
   const db = new sqlite3.Database(dbPath);
   
@@ -295,7 +295,7 @@ export async function messageSentHook(
     });
     
     // 🆕 P1: 实时写入工作记忆
-    const dbPath = path.join(getDataDir(pluginContext), 'cortex.db');
+    const dbPath = path.join((memoryHub as any).ctx?.workspaceDir, 'data', agentId || 'default', 'cortex.db');
     const sqlite3 = require('sqlite3').verbose();
     const db = new sqlite3.Database(dbPath);
     
@@ -536,9 +536,10 @@ async function searchRelatedKnowledge(message: string, workspaceDir: string): Pr
 /**
  * 🆕 P1: 加载当前会话的工作记忆
  */
-async function loadWorkingMemory(sessionId?: string): Promise<string> {
+async function loadWorkingMemory(sessionId?: string, workspaceDir?: string, agentId?: string): Promise<string> {
   try {
-    const dbPath = path.join(getDataDir(pluginContext), 'cortex.db');
+    if (!workspaceDir || !agentId) return '';
+    const dbPath = path.join(workspaceDir, 'data', agentId, 'cortex.db');
     
     if (!fs.existsSync(dbPath)) {
       return '';

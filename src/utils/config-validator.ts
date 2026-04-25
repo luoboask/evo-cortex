@@ -8,12 +8,28 @@ import type { MemoryConfig } from "../memory/memory_hub";
 import type { KnowledgeConfig } from "../knowledge/knowledge_graph";
 import type { EvolutionConfig } from "../evolution/scheduler";
 
+export type EmbeddingMode = "auto" | "semantic" | "keyword";
+export type EmbeddingFallback = "tfidf" | "keyword";
+
+export interface EmbeddingConfig {
+  enabled: boolean;
+  mode: EmbeddingMode;
+  fallback: EmbeddingFallback;
+}
+
+export interface RetentionPolicy {
+  daily: number;   // 日记忆保留天数，默认 14
+  weekly: number;  // 周摘要保留周数，默认 8
+  monthly: number; // 月概述保留月数，默认 2
+}
+
 export interface EvoCortexConfig {
   agent_name?: string;  // 已废弃
   verbose?: boolean;
   memory?: Partial<MemoryConfig>;
   knowledge?: Partial<KnowledgeConfig>;
   evolution?: Partial<EvolutionConfig>;
+  embedding?: Partial<EmbeddingConfig>;
 }
 
 export interface ValidatedConfig {
@@ -21,6 +37,8 @@ export interface ValidatedConfig {
   memory: MemoryConfig;
   knowledge: KnowledgeConfig;
   evolution: EvolutionConfig;
+  embedding: EmbeddingConfig;
+  retention: RetentionPolicy;
   warnings: string[];
 }
 
@@ -39,6 +57,16 @@ const DEFAULT_CONFIG: ValidatedConfig = {
     enabled: true,
     fractal_thinking: true,
     active_learning: true
+  },
+  embedding: {
+    enabled: true,
+    mode: "auto",
+    fallback: "tfidf"
+  },
+  retention: {
+    daily: 14,
+    weekly: 8,
+    monthly: 2
   },
   warnings: []
 };
@@ -89,6 +117,22 @@ export function validateConfig(input: any): ValidatedConfig {
     config.evolution = {
       ...config.evolution,
       ...validateEvolutionConfig(input.evolution)
+    };
+  }
+
+  // 合并 embedding 配置
+  if (input.embedding && typeof input.embedding === 'object') {
+    config.embedding = {
+      ...config.embedding,
+      ...validateEmbeddingConfig(input.embedding)
+    };
+  }
+
+  // 合并 retention 配置
+  if (input.retention && typeof input.retention === 'object') {
+    config.retention = {
+      ...config.retention,
+      ...validateRetentionConfig(input.retention)
     };
   }
 
@@ -157,6 +201,58 @@ function validateEvolutionConfig(input: any): Partial<EvolutionConfig> {
 }
 
 /**
+ * 验证 embedding 配置
+ */
+function validateEmbeddingConfig(input: any): Partial<EmbeddingConfig> {
+  const config: Partial<EmbeddingConfig> = {};
+
+  if (typeof input.enabled === 'boolean') {
+    config.enabled = input.enabled;
+  }
+
+  if (input.mode === 'auto' || input.mode === 'semantic' || input.mode === 'keyword') {
+    config.mode = input.mode;
+  } else if (input.mode !== undefined) {
+    console.warn(`[Config] Invalid embedding.mode: ${input.mode}. Must be auto|semantic|keyword.`);
+  }
+
+  if (input.fallback === 'tfidf' || input.fallback === 'keyword') {
+    config.fallback = input.fallback;
+  } else if (input.fallback !== undefined) {
+    console.warn(`[Config] Invalid embedding.fallback: ${input.fallback}. Must be tfidf|keyword.`);
+  }
+
+  return config;
+}
+
+/**
+ * 验证保留策略配置
+ */
+function validateRetentionConfig(input: any): Partial<RetentionPolicy> {
+  const config: Partial<RetentionPolicy> = {};
+
+  if (typeof input.daily === 'number' && input.daily > 0 && input.daily <= 365) {
+    config.daily = input.daily;
+  } else if (input.daily !== undefined) {
+    console.warn(`[Config] Invalid retention.daily: ${input.daily}. Must be 1-365.`);
+  }
+
+  if (typeof input.weekly === 'number' && input.weekly > 0 && input.weekly <= 52) {
+    config.weekly = input.weekly;
+  } else if (input.weekly !== undefined) {
+    console.warn(`[Config] Invalid retention.weekly: ${input.weekly}. Must be 1-52.`);
+  }
+
+  if (typeof input.monthly === 'number' && input.monthly > 0 && input.monthly <= 24) {
+    config.monthly = input.monthly;
+  } else if (input.monthly !== undefined) {
+    console.warn(`[Config] Invalid retention.monthly: ${input.monthly}. Must be 1-24.`);
+  }
+
+  return config;
+}
+
+/**
  * 获取配置摘要（用于日志）
  */
 export function getConfigSummary(config: ValidatedConfig): string {
@@ -165,7 +261,9 @@ export function getConfigSummary(config: ValidatedConfig): string {
   if (config.memory.enabled) parts.push('memory');
   if (config.knowledge.enabled) parts.push('knowledge');
   if (config.evolution.enabled) parts.push('evolution');
+  if (config.embedding.enabled) parts.push(`embedding:${config.embedding.mode}`);
   if (config.verbose) parts.push('verbose');
+  parts.push(`retention:${config.retention.daily}d/${config.retention.weekly}w/${config.retention.monthly}m`);
   
   return parts.join(', ') || 'none';
 }
@@ -174,7 +272,5 @@ export function getConfigSummary(config: ValidatedConfig): string {
  * 检查配置是否有效（无严重错误）
  */
 export function isConfigValid(config: ValidatedConfig): boolean {
-  // 当前只要没有抛出异常就认为有效
-  // 可以添加更多验证逻辑
   return true;
 }

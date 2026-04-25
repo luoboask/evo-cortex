@@ -72,6 +72,29 @@
             "default": true
           }
         }
+      },
+      "embedding": {
+        "type": "object",
+        "description": "语义搜索配置 - 控制记忆和知识搜索的搜索模式",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "是否启用语义搜索",
+            "default": true
+          },
+          "mode": {
+            "type": "string",
+            "description": "搜索模式: auto=自动降级 | semantic=仅语义 | keyword=仅关键词",
+            "default": "auto",
+            "enum": ["auto", "semantic", "keyword"]
+          },
+          "fallback": {
+            "type": "string",
+            "description": "API 不可用时的降级策略: tfidf=本地TF-IDF | keyword=关键词匹配",
+            "default": "tfidf",
+            "enum": ["tfidf", "keyword"]
+          }
+        }
       }
     },
     "required": []
