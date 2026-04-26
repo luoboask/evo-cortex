@@ -238,15 +238,10 @@ create_script_task \
 执行脚本：scripts/session-scan.sh
 
 输出:
-- 数据库：data/$AGENT_ID/cortex.db
+- 数据库：data/$AGENT_NAME/cortex.db
 - Markdown: USER_PREFERENCES.md
 
 无需 LLM 分析，纯脚本执行。"
-4. 更新会话清单文件
-5. 检测新增的会话
-6. 输出扫描摘要
-
-无需 LLM 分析，仅文件扫描。"
 
 # 9. realtime-index (每 5 分钟)
 create_script_task \

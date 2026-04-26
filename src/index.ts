@@ -144,7 +144,7 @@ const plugin = {
 
     // 1. 记忆搜索工具
     api.registerTool((ctx: OpenClawPluginToolContext) => {
-      const pluginCtx = buildPluginContext(ctx);
+      const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
         component: 'search_memory',
@@ -186,7 +186,7 @@ const plugin = {
 
     // 2. 知识检索工具
     api.registerTool((ctx: OpenClawPluginToolContext) => {
-      const pluginCtx = buildPluginContext(ctx);
+      const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
         component: 'search_knowledge',
@@ -228,7 +228,7 @@ const plugin = {
 
     // 3. 索引管理工具
     api.registerTool((ctx: OpenClawPluginToolContext) => {
-      const pluginCtx = buildPluginContext(ctx);
+      const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
         component: 'manage_index',
@@ -283,7 +283,7 @@ const plugin = {
 
     // 10. 会话扫描工具
     api.registerTool((ctx: OpenClawPluginToolContext) => {
-      const pluginCtx = buildPluginContext(ctx);
+      const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
         component: 'scan_sessions',
@@ -333,7 +333,7 @@ const plugin = {
 
     // 7. 记忆压缩工具
     api.registerTool((ctx) => {
-      const pluginCtx = buildPluginContext(ctx);
+      const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({ agentId: pluginCtx.agentId, component: 'memory_compress', verbose: config.verbose });
       const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
 
@@ -361,7 +361,7 @@ const plugin = {
 
     // 8. 记忆清理工具
     api.registerTool((ctx) => {
-      const pluginCtx = buildPluginContext(ctx);
+      const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({ agentId: pluginCtx.agentId, component: 'memory_cleanup', verbose: config.verbose });
       const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
 
@@ -423,7 +423,7 @@ const plugin = {
 
     // 11. 健康检查工具
     api.registerTool((ctx) => {
-      const pluginCtx = buildPluginContext(ctx);
+      const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
         component: 'health_check',
