@@ -13,6 +13,7 @@
 
 import { MemoryHub } from "../memory/memory_hub";
 import { KnowledgeGraph } from "../knowledge/knowledge_graph";
+import { safeHook, CircuitBreaker, getHookHealthSummary } from "./hook_health";
 import type { Logger } from "../utils/logger";
 import * as fs from 'fs';
 import * as path from 'path';
@@ -31,6 +32,9 @@ const PREF_CACHE_TTL = 5 * 60 * 1000; // 5 分钟
 /** 工作记忆写入节流 */
 const wmThrottle = new Map<string, number>();
 const WM_THROTTLE_MS = 10000; // 10 秒
+
+/** 嵌入 API 熔断器 — 故障 3 次后暂停 5 分钟，不阻塞正常对话 */
+const embeddingBreaker = new CircuitBreaker(3, 5 * 60 * 1000);
 
 /** 检查缓存是否有效 */
 function isPrefCacheValid(key: string, filePath: string): boolean {
@@ -222,7 +226,7 @@ function isRealConversation(text: string): boolean {
 }
 
 /**
- * 对话前钩子：检索记忆和知识，增强上下文
+ * 对话前钩子：检索记忆和知识，增强上下文（带安全包装）
  */
 export async function messageReceivedHook(
   message: any,
@@ -231,70 +235,77 @@ export async function messageReceivedHook(
   agentId?: string,
   logger?: Logger
 ): Promise<Record<string, any>> {
-  const content = message.content || "";
-  
-  // 自动加载用户偏好
-  const preferences = await loadUserPreferences(
-    (memoryHub as any).ctx?.workspaceDir,
-    agentId,
-    logger
-  );
-  
-  // 双向写入工作记忆（sqlite3 可选）
-  const workspaceDir = (memoryHub as any).ctx?.workspaceDir || '';
-  const dbPath = path.join(workspaceDir, 'data', agentId || 'default', 'cortex.db');
-  
-  // 1. 保存上一轮 AI 回复（如果有）
-  if (message.context?.lastResponse && isRealConversation(message.context.lastResponse)) {
-    safeWriteWorkingMemory(dbPath, agentId || 'unknown', `AI: ${message.context.lastResponse}`, logger);
-  }
-  
-  // 2. 保存当前用户问题
-  if (content && content.length > 0 && isRealConversation(content)) {
-    safeWriteWorkingMemory(dbPath, agentId || 'unknown', `User: ${content}`, logger);
-  }
-  
-  // 判断是否需要检索增强
-  const needsEnhancement = shouldEnhance(content);
-  
-  if (!needsEnhancement && !preferences) {
-    logger?.debug('Message does not require enhancement and no preferences loaded');
-    return {};
-  }
-  
-  // 构建返回结果
-  const result: Record<string, any> = {};
-  
-  if (preferences) {
-    result.system_prompt_addition = preferences;
-  }
-  
-  if (needsEnhancement) {
-    try {
-      const memories = await memoryHub.search(content, 5);
-      const knowledge = await knowledgeGraph.search(content);
-      const context = buildEnhancedContext(content, memories, knowledge);
-      
+  return safeHook('messageReceivedHook', async () => {
+    const content = message.content || "";
+
+    // 自动加载用户偏好（轻量操作，不做安全包装）
+    const preferences = await loadUserPreferences(
+      (memoryHub as any).ctx?.workspaceDir,
+      agentId,
+      logger
+    );
+
+    // 双向写入工作记忆（sqlite3 可选）
+    const workspaceDir = (memoryHub as any).ctx?.workspaceDir || '';
+    const dbPath = path.join(workspaceDir, 'data', agentId || 'default', 'cortex.db');
+
+    if (message.context?.lastResponse && isRealConversation(message.context.lastResponse)) {
+      safeWriteWorkingMemory(dbPath, agentId || 'unknown', `AI: ${message.context.lastResponse}`, logger);
+    }
+    if (content && isRealConversation(content)) {
+      safeWriteWorkingMemory(dbPath, agentId || 'unknown', `User: ${content}`, logger);
+    }
+
+    // 判断是否需要检索增强 + 当前策略（熔断感知）
+    const needsEnhancement = shouldEnhance(content);
+    const strategy = getEnhanceStrategy();
+
+    if (!needsEnhancement && !preferences) {
+      logger?.debug('No enhancement needed, no preferences');
+      return {};
+    }
+
+    const result: Record<string, any> = {};
+    if (preferences) {
+      result.system_prompt_addition = preferences;
+    }
+
+    if (needsEnhancement) {
+      // 检索记忆 + 知识（带熔断保护，不阻塞对话）
+      const memories = await safeHook('memorySearch',
+        () => memoryHub.search(content, 5),
+        []
+      ) || [];
+
+      const knowledge = await safeHook('knowledgeSearch',
+        () => knowledgeGraph.search(content),
+        []
+      ) || [];
+
+      if (strategy === 'keyword-only') {
+        logger?.hook('message_received', 'Keyword-only mode (embedding circuit breaker open)');
+      }
+
+      const context = buildEnhancedContext(content, memories, knowledge, strategy);
       if (context) {
         result.system_prompt_addition = (result.system_prompt_addition || '') + context;
       }
-      
       result.memories = memories;
       result.knowledge = knowledge;
-      
-      logger?.hook('message_received', `Enhanced with ${memories.length} memories, ${knowledge.length} knowledge${preferences ? ', user preferences loaded' : ''}`);
-    } catch (error) {
-      logger?.error('Enhancement failed', error);
+      result.enhance_strategy = strategy;
+
+      logger?.hook('message_received',
+        `Enhanced: ${memories.length} memories, ${knowledge.length} knowledge, strategy=${strategy}`);
+    } else {
+      logger?.hook('message_received', preferences ? 'User preferences loaded' : 'No enhancement needed');
     }
-  } else {
-    logger?.hook('message_received', preferences ? 'User preferences loaded' : 'No enhancement needed');
-  }
-  
-  return result;
+
+    return result;
+  }, {});
 }
 
 /**
- * 对话后钩子：存储记忆和提取知识
+ * 对话后钩子：存储记忆和提取知识（带安全包装）
  */
 export async function messageSentHook(
   message: any,
@@ -303,60 +314,67 @@ export async function messageSentHook(
   agentId?: string,
   logger?: Logger
 ): Promise<Record<string, any>> {
-  const content = message.content || "";
-  
-  try {
-    // 1. 存储对话到记忆
-    await memoryHub.add({
-      content: content,
-      type: "session",
-      timestamp: new Date().toISOString()
-    });
-    
+  return safeHook('messageSentHook', async () => {
+    const content = message.content || "";
+
+    // 1. 存储对话到记忆（失败不阻塞）
+    await safeHook('memoryStore', async () =>
+      memoryHub.add({
+        content: content,
+        type: "session",
+        timestamp: new Date().toISOString()
+      }),
+      null
+    );
+
     // 实时写入工作记忆（sqlite3 可选）
     const workspaceDir = (memoryHub as any).ctx?.workspaceDir || '';
     const dbPath = path.join(workspaceDir, 'data', agentId || 'default', 'cortex.db');
     safeWriteWorkingMemory(dbPath, agentId || 'unknown', content, logger);
-    
-    // 2. 提取概念到知识图谱（v1.4.0 简化版）
+
+    // 2. 提取概念到知识图谱（带熔断保护）
     const concepts = extractConcepts(content);
     if (concepts.length > 0) {
       for (const concept of concepts.slice(0, 10)) {
-        await knowledgeGraph.addEntity({
-          name: concept,
-          type: 'keyword',
-          description: concept,
-          createdAt: new Date().toISOString()
-        });
+        await safeHook('kgAddEntity', async () =>
+          knowledgeGraph.addEntity({
+            name: concept,
+            type: 'keyword',
+            description: concept,
+            createdAt: new Date().toISOString()
+          }),
+          null
+        );
       }
       logger?.hook('concept_extracted', `Extracted ${concepts.length} concepts`);
     }
-    
+
     logger?.hook('message_sent', 'Stored memory');
-    
     return {};
-  } catch (error) {
-    logger?.error('Memory storage failed', error);
-    return {};
-  }
+  }, {});
 }
 
 /**
- * 工具调用前钩子：安全检查
+ * 工具调用前钩子：熔断安全检查（记录敏感工具调用，不阻塞）
  */
 export async function beforeToolCallHook(
   toolCall: any,
   logger?: Logger
 ): Promise<Record<string, any>> {
-  const toolName = toolCall.name || "";
-  
-  const sensitiveTools = ["delete_file", "exec", "send_email", "system.run"];
-  if (sensitiveTools.includes(toolName)) {
-    logger?.hook('before_tool_call', `Sensitive tool detected: ${toolName}`);
-  }
-  
-  return { block: false };
+  return safeHook('beforeToolCallHook', () => {
+    const toolName = toolCall.name || "";
+    const sensitiveTools = ["delete_file", "exec", "send_email", "system.run"];
+    if (sensitiveTools.includes(toolName)) {
+      logger?.hook('before_tool_call', `Sensitive tool: ${toolName}`);
+    }
+    return Promise.resolve({ block: false });
+  }, { block: false });
 }
+
+/**
+ * 获取钩子健康状态（供诊断用）
+ */
+export { getHookHealthSummary, embeddingBreaker };
 
 // ========== 辅助函数 ==========
 
@@ -366,41 +384,51 @@ export async function beforeToolCallHook(
  */
 function shouldEnhance(message: string): boolean {
   const lower = message.toLowerCase();
-  
+
   // 直接询问历史/记忆
   const historyTriggers = [
     "之前做过", "之前说过", "还记得", "记得吗", "上次", "以前",
     "history", "remember", "previous", "before", "last time"
   ];
   if (historyTriggers.some(t => lower.includes(t.toLowerCase()))) return true;
-  
+
   // 询问建议/推荐/方案（需要上下文）
   const suggestionTriggers = [
     "推荐", "建议", "方案", "怎么", "如何", "什么", "哪个",
     "recommend", "suggest", "how", "what", "which"
   ];
   if (suggestionTriggers.some(t => lower.includes(t.toLowerCase()))) return true;
-  
+
   // 追问/继续（需要上下文）
   const followUpTriggers = [
     "继续", "然后", "接下来", "还有", "补充", "详细",
     "continue", "then", "next", "more", "detail"
   ];
   if (followUpTriggers.some(t => lower.includes(t.toLowerCase()))) return true;
-  
+
   return false;
 }
 
 /**
- * 构建增强上下文
+ * 自适应增强策略 — 嵌入 API 熔断时降级为关键词模式，不阻塞对话。 */
+function getEnhanceStrategy(): 'full' | 'keyword-only' {
+  const state = embeddingBreaker.getState();
+  if (state.state === 'open') return 'keyword-only';
+  return 'full';
+}
+
+/**
+ * 构建增强上下文（支持关键词降级模式）
  */
 function buildEnhancedContext(
   message: string,
   memories: any[],
-  knowledge: any[]
+  knowledge: any[],
+  strategy: 'full' | 'keyword-only' = 'full'
 ): string {
-  let context = "📚 相关信息:\n\n";
-  
+  const modeLabel = strategy === 'keyword-only' ? ' (关键词模式)' : '';
+  let context = `📚 相关信息${modeLabel}:\n\n`;
+
   if (memories.length > 0) {
     context += "💭 历史记忆:\n";
     memories.slice(0, 3).forEach((m, i) => {
@@ -409,7 +437,7 @@ function buildEnhancedContext(
     });
     context += "\n";
   }
-  
+
   if (knowledge.length > 0) {
     context += "📖 领域知识:\n";
     knowledge.slice(0, 3).forEach((k, i) => {
@@ -419,7 +447,7 @@ function buildEnhancedContext(
     });
     context += "\n";
   }
-  
+
   return context;
 }
 

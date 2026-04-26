@@ -20,6 +20,10 @@ const DASHSCOPE_OPENAI_MODEL = 'text-embedding-v3';
 let dashscopeApiKey: string | null = null;
 let dashscopeApiAvailable = false;
 
+// 请求去重：相同文本的并发请求共享同一个 Promise
+type PendingRequest = Promise<number[] | null>;
+const pendingRequests = new Map<string, PendingRequest>();
+
 /**
  * 从 OpenClaw 配置加载 DashScope API Key
  */
@@ -50,11 +54,11 @@ function loadDashScopeKey(): string | null {
 }
 
 /**
- * 尝试 DashScope OpenAI 兼容模式
+ * 尝试 DashScope OpenAI 兼容模式（支持批量）
  */
-async function tryOpenAICompatible(text: string): Promise<number[] | null> {
+async function tryOpenAICompatible(texts: string[]): Promise<(number[] | null)[]> {
   const key = loadDashScopeKey();
-  if (!key) return null;
+  if (!key) return texts.map(() => null);
 
   try {
     const resp = await fetch(DASHSCOPE_OPENAI_URL, {
@@ -65,31 +69,38 @@ async function tryOpenAICompatible(text: string): Promise<number[] | null> {
       },
       body: JSON.stringify({
         model: DASHSCOPE_OPENAI_MODEL,
-        input: text,
+        input: texts,
         dimensions: 1024,
       }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(15000),
     });
 
-    if (!resp.ok) return null;
+    if (!resp.ok) return texts.map(() => null);
 
     const data: any = await resp.json();
-    if (data.data?.[0]?.embedding) {
+    if (data.data) {
       dashscopeApiAvailable = true;
-      return data.data[0].embedding;
+      // 按原始顺序返回，缺失的补 null
+      const results: (number[] | null)[] = new Array(texts.length).fill(null);
+      for (const item of data.data) {
+        if (item.index !== undefined && item.embedding) {
+          results[item.index] = item.embedding;
+        }
+      }
+      return results;
     }
   } catch {
     // fall through
   }
-  return null;
+  return texts.map(() => null);
 }
 
 /**
- * 尝试 DashScope 原生 API
+ * 尝试 DashScope 原生 API（支持批量）
  */
-async function tryDashScopeNative(text: string): Promise<number[] | null> {
+async function tryDashScopeNative(texts: string[]): Promise<(number[] | null)[]> {
   const key = loadDashScopeKey();
-  if (!key) return null;
+  if (!key) return texts.map(() => null);
 
   try {
     const resp = await fetch(DASHSCOPE_EMBEDDING_URL, {
@@ -101,38 +112,90 @@ async function tryDashScopeNative(text: string): Promise<number[] | null> {
       },
       body: JSON.stringify({
         model: DASHSCOPE_EMBEDDING_MODEL,
-        input: { texts: [text] },
+        input: { texts },
         parameters: { text_type: 'query' },
       }),
-      signal: AbortSignal.timeout(10000),
+      signal: AbortSignal.timeout(15000),
     });
 
-    if (!resp.ok) return null;
+    if (!resp.ok) return texts.map(() => null);
 
     const data: any = await resp.json();
-    if (data.output?.embeddings?.[0]?.embedding) {
+    if (data.output?.embeddings) {
       dashscopeApiAvailable = true;
-      return data.output.embeddings[0].embedding;
+      const results: (number[] | null)[] = new Array(texts.length).fill(null);
+      for (const emb of data.output.embeddings) {
+        if (emb.text_index !== undefined && emb.embedding) {
+          results[emb.text_index] = emb.embedding;
+        } else if (emb.embedding) {
+          // 没有 index 时按顺序填充（兼容旧版响应格式）
+          const emptyIdx = results.findIndex(r => r === null);
+          if (emptyIdx >= 0) results[emptyIdx] = emb.embedding;
+        }
+      }
+      return results;
     }
   } catch {
     // fall through
   }
-  return null;
+  return texts.map(() => null);
 }
 
 /**
- * Level 1: 调用 DashScope embedding API
+ * Level 1: 调用 DashScope embedding API（单条，兼容旧接口）
  */
 export async function getApiEmbedding(text: string): Promise<number[] | null> {
-  // 优先 OpenAI 兼容模式
-  let result = await tryOpenAICompatible(text);
-  if (result) return result;
+  const results = await getApiEmbeddingBatch([text]);
+  return results[0];
+}
 
-  // 降级到原生 API
-  result = await tryDashScopeNative(text);
-  if (result) return result;
+/**
+ * Level 1: 批量调用 DashScope embedding API（最多 25 条）
+ * 自动去重相同文本的请求，合并为一次 API 调用。
+ */
+export async function getApiEmbeddingBatch(texts: string[]): Promise<(number[] | null)[]> {
+  if (texts.length === 0) return [];
+  if (texts.length > 25) {
+    // 超过限制时分批处理
+    const results: (number[] | null)[] = [];
+    for (let i = 0; i < texts.length; i += 25) {
+      const batch = texts.slice(i, i + 25);
+      results.push(...await getApiEmbeddingBatch(batch));
+    }
+    return results;
+  }
 
-  return null;
+  // 请求去重：相同文本共享 Promise
+  const uniqueTexts = [...new Set(texts)];
+  const uniquePromises: PendingRequest[] = [];
+  const textToPromise = new Map<string, PendingRequest>();
+
+  for (const text of uniqueTexts) {
+    const existing = pendingRequests.get(text);
+    if (existing) {
+      textToPromise.set(text, existing);
+    } else {
+      // 创建新请求：优先 OpenAI 兼容模式，降级到原生
+      const promise = (async () => {
+        let result = await tryOpenAICompatible([text]);
+        if (result[0]) return result[0];
+        result = await tryDashScopeNative([text]);
+        return result[0];
+      })();
+
+      // 清理机制：请求完成后从 pending 中移除
+      promise.finally(() => pendingRequests.delete(text));
+      pendingRequests.set(text, promise);
+      textToPromise.set(text, promise);
+    }
+  }
+
+  // 等待所有唯一请求完成，然后映射回原始顺序
+  const uniqueResults = await Promise.all(uniqueTexts.map(t => textToPromise.get(t)!));
+  const resultMap = new Map<string, number[] | null>();
+  uniqueTexts.forEach((text, i) => resultMap.set(text, uniqueResults[i]));
+
+  return texts.map(text => resultMap.get(text) || null);
 }
 
 // ========== Level 2: TF-IDF Local Embedding ==========
@@ -392,6 +455,36 @@ export async function getEmbedding(text: string): Promise<number[]> {
 
   // Level 3: Simple char frequency
   return tfidfEngine.encode(text);
+}
+
+/**
+ * 批量生成 embeddings（自动分桶：API 支持的批量走 API，其余走本地）
+ */
+export async function getEmbeddingsBatch(texts: string[]): Promise<(number[] | null)[]> {
+  if (texts.length === 0) return [];
+
+  // 全部尝试 API 批量调用（内部自动处理分批和去重）
+  if (dashscopeApiAvailable || dashscopeApiKey === null) {
+    const apiResults = await getApiEmbeddingBatch(texts);
+
+    // 检查是否有 API 返回了结果
+    const apiSuccessCount = apiResults.filter(r => r !== null).length;
+    if (apiSuccessCount > 0) {
+      // 部分成功：对失败的文本尝试本地降级
+      const results = [...apiResults];
+      for (let i = 0; i < texts.length; i++) {
+        if (!results[i]) {
+          results[i] = tfidfTrained ? tfidfEngine.encode(texts[i]) : tfidfEngine['simpleCharFreq'](texts[i]);
+        }
+      }
+      return results;
+    }
+  }
+
+  // API 不可用，全部走本地
+  return texts.map(text =>
+    tfidfTrained ? tfidfEngine.encode(text) : tfidfEngine['simpleCharFreq'](text)
+  );
 }
 
 /**

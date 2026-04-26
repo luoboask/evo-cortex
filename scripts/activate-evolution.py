@@ -4,7 +4,7 @@
 激活 Evo-Cortex 的自进化能力
 
 功能:
-1. 从 session_memories 提取进化事件
+1. 从 working_memory/session_messages 提取进化事件
 2. 识别模式并生成元规则
 3. 生成自我改进建议
 4. 输出到 evolution/{agent_id}/ 目录
@@ -48,7 +48,7 @@ class EvolutionEventExtractor:
         self.config = config
     
     def extract_events(self, limit: int = 100, min_importance: float = 3.0) -> List[Dict]:
-        """从 session_memories 提取进化事件
+        """从 working_memory 提取进化事件（适配实际 schema）
         
         Args:
             limit: 最多提取的事件数量
@@ -62,20 +62,28 @@ class EvolutionEventExtractor:
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
         
-        # 获取高重要性记忆（默认 importance >= 4.0）
+        # working_memory 没有 importance 列，用 message_count + content 长度计算
         cur.execute('''
-            SELECT id, session_id, content, importance, tags, created_at
-            FROM session_memories
-            WHERE importance >= ?
-            ORDER BY created_at DESC
+            SELECT id, session_id, content, message_count, created_at
+            FROM working_memory
+            ORDER BY message_count DESC, length(content) DESC
             LIMIT ?
-        ''', (min_importance, limit))
+        ''', (limit,))
         
         events = []
         for row in cur.fetchall():
-            event = self._classify_event(dict(row))
-            if event:
-                events.append(event)
+            memory = dict(row)
+            # 计算动态 importance（message_count + content 长度）
+            msg_count = memory.get('message_count', 1)
+            content_len = len(memory.get('content', ''))
+            importance = min(10.0, msg_count * 0.5 + content_len / 500.0)
+            memory['importance'] = importance
+            memory['tags'] = ''  # 由 _classify_event 生成
+            
+            if importance >= min_importance:
+                event = self._classify_event(memory)
+                if event:
+                    events.append(event)
         
         conn.close()
         return events

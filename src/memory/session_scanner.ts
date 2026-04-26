@@ -1,11 +1,14 @@
 /**
- * 会话扫描器 v3 — 带工作记忆整合
+ * 会话扫描器 v4 — 增量存储 + 智能晋升
  * 
  * 职责：
- * 1. 扫描 .jsonl 会话文件，增量导入
- * 2. 整合工作记忆 (working_memory) → 长期记忆
- * 3. 提取用户偏好 → preferences 表
- * 4. 提取概念 → 知识图谱
+ * 1. 每 5 分钟扫描 .jsonl 会话文件，增量导入
+ * 2. 新会话存为 working_session（工作会话）
+ * 3. 自动判断是否晋升为 long_term（长期会话）
+ *    - 消息数 ≥ 10 条
+ *    - 或对话时长 ≥ 30 分钟
+ *    - 或包含关键技术讨论（代码/配置/错误）
+ * 4. 提取用户偏好 → preferences 表
  */
 
 import * as fs from 'fs';
@@ -28,7 +31,8 @@ export interface ScanResult {
   updatedSessions: number;
   skipped: number;
   memoriesSaved: number;
-  workingMemoryConsolidated: number;
+  promoted: number;
+  workingSessions: number;
   preferencesExtracted: number;
 }
 
@@ -89,14 +93,12 @@ export class SessionScanner {
       updatedSessions: 0,
       skipped: 0,
       memoriesSaved: 0,
-      workingMemoryConsolidated: 0,
+      promoted: 0,
+      workingSessions: 0,
       preferencesExtracted: 0
     };
 
-    // 第一步：整合工作记忆 → 长期记忆
-    result.workingMemoryConsolidated = await this.consolidateWorkingMemory(knowledgeGraph);
-
-    // 第二步：扫描会话文件
+    // 扫描会话文件 + 增量存储
     if (fs.existsSync(this.sessionsDir)) {
       const sessionFiles = this.getSessionFiles();
       result.scanned = sessionFiles.length;
@@ -114,7 +116,10 @@ export class SessionScanner {
         }
 
         const saved = await this.processSession(sessionInfo, existingState);
-        result.memoriesSaved += saved;
+        result.memoriesSaved += saved.saved;
+        result.promoted += saved.promoted;
+        result.workingSessions += saved.working;
+        result.preferencesExtracted += saved.prefs;
 
         this.state[stateKey] = {
           hash: sessionInfo.hash,
@@ -138,7 +143,7 @@ export class SessionScanner {
       `${result.scanned} scanned, ${result.newSessions} new, ` +
       `${result.updatedSessions} updated, ${result.skipped} skipped, ` +
       `${result.memoriesSaved} memories, ` +
-      `${result.workingMemoryConsolidated} WM consolidated, ` +
+      `${result.workingSessions} working, ${result.promoted} promoted, ` +
       `${result.preferencesExtracted} prefs extracted`
     );
 
@@ -315,7 +320,16 @@ export class SessionScanner {
   }
 
   /**
-   * 从对话中提取用户偏好
+   * 从对话中提取用户偏好（增强版）
+   * 
+   * 分类体系：
+   * - communication: 沟通风格（语言、详细程度、语气等）
+   * - code_example: 代码示例偏好（语言、框架、风格）
+   * - format: 格式偏好（表格、列表、markdown等）
+   * - tech_stack: 技术栈（前端、后端、数据库、工具）
+   * - workflow: 工作流偏好（先讨论再实现、直接给代码等）
+   * - like: 明确表达过的好感
+   * - dislike: 明确表达过的反感
    */
   private extractPreferences(content: string): Array<{
     category: string;
@@ -324,29 +338,155 @@ export class SessionScanner {
     confidence: number;
   }> {
     const prefs: Array<{ category: string; key: string; value: string; confidence: number }> = [];
+    const seen = new Set<string>(); // 去重
 
-    // 偏好模式匹配
-    const patterns = [
-      // 明确表达喜好
-      { regex: /我(喜欢|偏好|习惯|习惯用|倾向于).{0,5}([^\n。！？]{2,30})/g, category: 'preference', key: 'like' },
-      { regex: /我不(喜欢|喜欢用|想要|需要|倾向).{0,5}([^\n。！？]{2,30})/g, category: 'preference', key: 'dislike' },
-      // 格式要求
-      { regex: /用(.{1,5})(格式|方式|风格).{0,3}([^\n。！？]{2,20})/g, category: 'format', key: 'style' },
-      // 技术栈
-      { regex: /(React|Vue|Angular|Python|Go|Java|Rust|TypeScript|Node\.js)/g, category: 'tech', key: 'stack' },
+    const addPref = (category: string, key: string, value: string, confidence: number) => {
+      const normValue = value.trim().replace(/[。！？\n]/g, '').slice(0, 100);
+      if (!normValue || normValue.length < 2) return;
+      const dedupKey = `${category}:${key}:${normValue.toLowerCase()}`;
+      if (seen.has(dedupKey)) return;
+      seen.add(dedupKey);
+      prefs.push({ category, key, value: normValue, confidence });
+    };
+
+    // ==================== 1. 明确表达喜好 ====================
+    const likePatterns = [
+      // 我喜欢/偏好/习惯/倾向于...
+      { regex: /我\s*(?:比较)?\s*(?:喜欢|偏好|倾向|习惯(?:用)?|更倾向)/g, category: 'like', key: 'preference' },
+      // 我觉得...比较好/比较好用
+      { regex: /我\s*觉得\s*([^,，]{2,20})\s*(?:比较|更)?\s*(?:好|好用|不错|不错用|合适)/g, category: 'like', key: 'opinion' },
+      // ...不错/挺好的/很好用
+      { regex: /([^\n]{2,20})\s*(?:不错|挺好的|很好用|蛮好|很赞|很棒)/g, category: 'like', key: 'praise' },
     ];
 
-    for (const pattern of patterns) {
-      const matches = content.matchAll(pattern.regex);
+    const dislikePatterns = [
+      // 我不喜欢/不想/不要/避免/别用/不要用
+      { regex: /我\s*(?:不|别|很少)\s*(?:喜欢|想|想要|需要|倾向|习惯|推荐)/g, category: 'dislike', key: 'preference' },
+      // 不要用/别用/尽量避免/不太喜欢
+      { regex: /(?:不要|别|避免|尽量别|不太喜欢|不太想)\s*(?:用)?\s*([^\n。！？]{2,30})/g, category: 'dislike', key: 'avoid' },
+      // ...不好/不太好用/不太行
+      { regex: /([^\n]{2,20})\s*(?:不太好|不太好用|不太行|不好用|太麻烦|太复杂|太繁琐)/g, category: 'dislike', key: 'complaint' },
+    ];
+
+    // ==================== 2. 沟通风格 ====================
+    const communicationPatterns = [
+      // 语言偏好
+      { regex: /用\s*(中文|英文|简体|繁体|英文|日语|日语)\s*(交流|回复|回答|对话|写)/g, key: 'language' },
+      // 简洁/详细要求
+      { regex: /(?:回答|回复|解释|说明)\s*(?:尽量|尽量|尽可能|尽量|最好)\s*([^\n。！？]{2,20})/g, key: 'detail_level' },
+      { regex: /(?:(?:简洁|简短|精炼|详细|详细|全面|完整)\s*(?:一些|一点|地|的|回复|回答|解释|说明))/g, key: 'detail_level' },
+      // 语气/风格
+      { regex: /(?:(?:口语|书面|正式|非正式|轻松|严肃|专业|通俗)\s*(?:化|风格|一点|一些))/g, key: 'tone' },
+    ];
+
+    // ==================== 3. 代码示例偏好 ====================
+    const codePatterns = [
+      // 语言偏好
+      { regex: /用\s*([^\s\n]{1,10})\s*(?:写|实现|做|给出|示例|代码)/g, key: 'language' },
+      // 代码风格
+      { regex: /(?:(?:函数式|面向对象|声明式|命令式|响应式)\s*(?:风格|编程|写法))/g, key: 'style' },
+      // 注释要求
+      { regex: /(?:(?:加上|写好|加上|附带|包含)\s*(?:详细)?\s*(?:注释|说明|文档))/g, key: 'comments' },
+    ];
+
+    // ==================== 4. 格式偏好 ====================
+    const formatPatterns = [
+      // 格式要求
+      { regex: /用\s*([^\s\n]{1,10})\s*(?:格式|方式|风格|排版)/g, key: 'format' },
+      // 表格/列表/代码块偏好
+      { regex: /(?:(?:用|使用|给出)\s*(?:表格|列表|代码块|示例|对比表|对照表))/g, key: 'format' },
+      { regex: /(?:(?:markdown|Markdown|MD)\s*(?:格式|语法|排版))/g, key: 'format' },
+    ];
+
+    // ==================== 5. 技术栈 ====================
+    const techKeywords: Record<string, string> = {
+      'React': 'frontend', 'Vue': 'frontend', 'Angular': 'frontend', 'Svelte': 'frontend', 'Next\.js': 'frontend', 'Nuxt': 'frontend',
+      'Node\.js': 'backend', 'Django': 'backend', 'Flask': 'backend', 'Spring': 'backend', 'Express': 'backend', 'FastAPI': 'backend',
+      'PostgreSQL': 'database', 'MySQL': 'database', 'MongoDB': 'database', 'Redis': 'database', 'SQLite': 'database',
+      'TypeScript': 'language', 'Python': 'language', 'Go': 'language', 'Java': 'language', 'Rust': 'language', 'Ruby': 'language',
+      'Docker': 'devops', 'Kubernetes': 'devops', 'CI/CD': 'devops', 'GitHub Actions': 'devops',
+      'Tailwind': 'frontend', 'Bootstrap': 'frontend', 'Ant Design': 'frontend', 'Material UI': 'frontend',
+    };
+
+    // ==================== 6. 工作流偏好 ====================
+    const workflowPatterns = [
+      // 先讨论再实现
+      { regex: /(?:(?:先|首先)\s*(?:讨论|分析|思考|确认|了解|梳理)[^\n]{0,10}(?:再|然后再|然后再|然后再|之后再))\s*([^\n。！？]{2,20})/g, key: 'approach' },
+      // 直接给方案
+      { regex: /(?:直接|直接给|不用问|不用讨论)[^\n]{0,10}(?:方案|代码|实现|结果)/g, key: 'approach' },
+      // 分步骤
+      { regex: /(?:分步|按步骤|一步步|逐步|一步一步)[^\n]{0,10}(?:实现|做|来|进行|解释)/g, key: 'approach' },
+    ];
+
+    // 执行所有模式匹配
+    const allPatterns = [
+      ...likePatterns.map(p => ({ ...p, category: p.category || 'like' })),
+      ...dislikePatterns.map(p => ({ ...p, category: p.category || 'dislike' })),
+    ];
+
+    for (const pattern of allPatterns) {
+      const regex = typeof pattern.regex === 'string' ? new RegExp(pattern.regex, 'gi') : pattern.regex;
+      const matches = content.matchAll(regex);
       for (const match of matches) {
-        const value = match[match.length - 1] || match[0];
+        const value = match[1] || match[0];
         if (value && value.length >= 2 && value.length <= 50) {
-          prefs.push({
-            category: pattern.category,
-            key: `${pattern.key}_${Date.now()}`,
-            value: value.trim(),
-            confidence: 0.6
-          });
+          addPref(pattern.category, pattern.key, value.trim(), 0.7);
+        }
+      }
+    }
+
+    // 通信风格
+    for (const pattern of communicationPatterns) {
+      const regex = typeof pattern.regex === 'string' ? new RegExp(pattern.regex, 'gi') : pattern.regex;
+      const matches = content.matchAll(regex);
+      for (const match of matches) {
+        const value = match[1] || match[2] || match[0];
+        if (value && value.length >= 2 && value.length <= 50) {
+          addPref('communication', pattern.key, value.trim(), 0.6);
+        }
+      }
+    }
+
+    // 代码示例
+    for (const pattern of codePatterns) {
+      const regex = typeof pattern.regex === 'string' ? new RegExp(pattern.regex, 'gi') : pattern.regex;
+      const matches = content.matchAll(regex);
+      for (const match of matches) {
+        const value = match[1] || match[0];
+        if (value && value.length >= 2 && value.length <= 50) {
+          addPref('code_example', pattern.key, value.trim(), 0.6);
+        }
+      }
+    }
+
+    // 格式偏好
+    for (const pattern of formatPatterns) {
+      const regex = typeof pattern.regex === 'string' ? new RegExp(pattern.regex, 'gi') : pattern.regex;
+      const matches = content.matchAll(regex);
+      for (const match of matches) {
+        const value = match[1] || match[0];
+        if (value && value.length >= 2 && value.length <= 50) {
+          addPref('format', pattern.key, value.trim(), 0.7);
+        }
+      }
+    }
+
+    // 技术栈
+    for (const [keyword, domain] of Object.entries(techKeywords)) {
+      const regex = new RegExp(`\\b${keyword}\\b`, 'gi');
+      if (regex.test(content)) {
+        addPref('tech_stack', domain, keyword, 0.5);
+      }
+    }
+
+    // 工作流
+    for (const pattern of workflowPatterns) {
+      const regex = typeof pattern.regex === 'string' ? new RegExp(pattern.regex, 'gi') : pattern.regex;
+      const matches = content.matchAll(regex);
+      for (const match of matches) {
+        const value = match[1] || match[0];
+        if (value && value.length >= 2 && value.length <= 50) {
+          addPref('workflow', pattern.key, value.trim(), 0.6);
         }
       }
     }
@@ -441,10 +581,15 @@ export class SessionScanner {
     }
   }
 
+  /**
+   * 处理单个会话文件：增量导入 + 判断存储层级
+   */
   private async processSession(
     session: SessionInfo,
     existingState?: SessionState
-  ): Promise<number> {
+  ): Promise<{ saved: number; promoted: number; working: number; prefs: number }> {
+    const result = { saved: 0, promoted: 0, working: 0, prefs: 0 };
+
     try {
       const content = fs.readFileSync(session.filePath, 'utf8');
       const lines = content.trim().split('\n').filter(l => l.trim());
@@ -453,14 +598,12 @@ export class SessionScanner {
         type: string;
         content: string;
         timestamp?: string;
-        tool?: string;
       }
 
       const messages: ParsedMessage[] = [];
       for (const line of lines) {
         try {
           const obj = JSON.parse(line);
-
           if (obj.type === 'user' && obj.content) {
             const textContent = this.extractTextContent(obj.content);
             if (textContent && textContent.length > 5) {
@@ -474,46 +617,118 @@ export class SessionScanner {
               messages.push({ type: 'assistant', content: textContent, timestamp: obj.timestamp });
             }
           }
-        } catch {
-          // skip
-        }
+        } catch { /* skip */ }
       }
 
       const startIndex = existingState?.lastMessageIndex || 0;
       const newMessages = messages.slice(startIndex);
+      if (newMessages.length === 0) return result;
 
-      if (newMessages.length === 0) return 0;
-
-      let saved = 0;
       const lazyHub = await this.getMemoryHub();
 
-      for (let i = 0; i < newMessages.length; i++) {
-        const msg = newMessages[i];
-        if (msg.type === 'user') {
-          let aiReply = '';
-          if (i + 1 < newMessages.length && newMessages[i + 1].type === 'assistant') {
-            aiReply = '\n\n--- AI 回复 ---\n\n' + newMessages[i + 1].content.slice(0, 2000);
-          }
+      // 合并为一条会话摘要
+      const userMsgs = newMessages.filter(m => m.type === 'user');
+      const assistantMsgs = newMessages.filter(m => m.type === 'assistant');
 
-          await lazyHub.add({
-            content: `Q: ${msg.content.slice(0, 2000)}${aiReply}`,
-            type: 'session',
-            timestamp: msg.timestamp || new Date().toISOString(),
-            metadata: {
-              sessionId: session.id,
-              messageIndex: startIndex + i,
-              source: 'session_scan'
-            }
-          });
-          saved++;
+      const summary = this.buildSessionSummary(userMsgs, assistantMsgs, session);
+
+      // 判断存储层级
+      const promotion = this.shouldPromote(newMessages, session);
+      const memoryType = promotion ? 'long_term' : 'working_session';
+
+      await lazyHub.add({
+        content: summary,
+        type: memoryType as any,
+        timestamp: newMessages[0].timestamp || new Date().toISOString(),
+        metadata: {
+          sessionId: session.id,
+          source: 'session_scan',
+          userMessageCount: userMsgs.length,
+          assistantMessageCount: assistantMsgs.length,
+          promoted: promotion
         }
+      });
+
+      result.saved = 1;
+      if (promotion) result.promoted++; else result.working++;
+
+      // 提取偏好
+      const prefs = this.extractPreferences(summary);
+      for (const pref of prefs) {
+        this.savePreference(pref);
+        result.prefs++;
       }
 
-      return saved;
+      return result;
     } catch (error) {
       console.error(`[SessionScanner] Error processing ${session.id}:`, error);
-      return 0;
+      return result;
     }
+  }
+
+  /**
+   * 构建会话摘要
+   */
+  private buildSessionSummary(
+    userMsgs: Array<{ content: string; timestamp?: string }>,
+    assistantMsgs: Array<{ content: string; timestamp?: string }>,
+    session: SessionInfo
+  ): string {
+    const MAX_PREVIEW = 500;
+    const parts: string[] = [];
+
+    // 用户问题摘要
+    if (userMsgs.length > 0) {
+      const topics = userMsgs.map(m => m.content.slice(0, 200));
+      parts.push(`用户问了 ${userMsgs.length} 个问题：\n${topics.join('\n---\n')}`);
+    }
+
+    // AI 回复摘要
+    if (assistantMsgs.length > 0) {
+      const replies = assistantMsgs.map(m => m.content.slice(0, MAX_PREVIEW));
+      parts.push(`AI 回复了 ${assistantMsgs.length} 次：\n${replies.join('\n---\n')}`);
+    }
+
+    return parts.join('\n\n');
+  }
+
+  /**
+   * 判断会话是否应该晋升为长期记忆
+   *
+   * 晋升条件（满足任一即可）：
+   * 1. 消息数 ≥ 10 条（深度对话）
+   * 2. 对话时长 ≥ 30 分钟
+   * 3. 包含技术关键词（代码/配置/错误/调试）
+   */
+  private shouldPromote(
+    messages: Array<{ type: string; content: string; timestamp?: string }>,
+    session: SessionInfo
+  ): boolean {
+    const userMsgs = messages.filter(m => m.type === 'user');
+    const assistantMsgs = messages.filter(m => m.type === 'assistant');
+    const totalMsgs = userMsgs.length + assistantMsgs.length;
+
+    // 条件 1: 消息数 ≥ 10
+    if (totalMsgs >= 10) return true;
+
+    // 条件 2: 对话时长 ≥ 30 分钟
+    const timestamps = messages
+      .map(m => m.timestamp)
+      .filter(Boolean)
+      .map(t => new Date(t!).getTime())
+      .sort((a, b) => a - b);
+    
+    if (timestamps.length >= 2) {
+      const durationMin = (timestamps[timestamps.length - 1] - timestamps[0]) / 60000;
+      if (durationMin >= 30) return true;
+    }
+
+    // 条件 3: 包含技术关键词
+    const techKeywords = /代码 | 配置 | 错误 | bug|debug|error|fix|修复 | 部署 | 编译 | 测试 | 优化 | 重构 | 架构 | 设计 | 实现|function|class|interface|type /i;
+    const allContent = messages.map(m => m.content).join('\n');
+    if (techKeywords.test(allContent)) return true;
+
+    return false;
   }
 
   private extractTextContent(content: any): string {

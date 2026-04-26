@@ -99,8 +99,7 @@ class SessionScanner:
             return 0
         
         if not self.memory_hub:
-            print("⏭️  MemoryHub 未初始化，跳过会话扫描")
-            return 0
+            print("⚠️  MemoryHub 未初始化，使用纯 SQLite 模式")
         
         # 获取所有会话文件
         session_files = list(self.sessions_path.glob('*.jsonl'))
@@ -126,11 +125,26 @@ class SessionScanner:
                 
                 # 合并会话内容为单个记忆
                 content_parts = []
-                for msg in messages[:20]:  # 限制前 20 条消息
-                    role = msg.get('message', {}).get('role', 'unknown')
-                    content = msg.get('message', {}).get('content', '')
-                    if content and len(content) < 500:
-                        content_parts.append(f"[{role}]: {content[:200]}")
+                for msg in messages:
+                    # OpenClaw JSONL 格式：message.content 是列表 [{"type":"text","text":"..."}]
+                    msg_obj = msg.get('message', {})
+                    role = msg_obj.get('role', 'unknown')
+                    raw_content = msg_obj.get('content', '')
+                    
+                    # 提取文本内容
+                    if isinstance(raw_content, list):
+                        text_parts = []
+                        for item in raw_content:
+                            if isinstance(item, dict) and item.get('type') == 'text':
+                                text_parts.append(item.get('text', ''))
+                        text_content = '\n'.join(text_parts)
+                    elif isinstance(raw_content, str):
+                        text_content = raw_content
+                    else:
+                        text_content = str(raw_content)
+                    
+                    if text_content and len(text_content) < 5000:
+                        content_parts.append(f"[{role}]: {text_content[:500]}")
                 
                 full_content = '\n\n'.join(content_parts)
                 
@@ -163,14 +177,58 @@ class SessionScanner:
                 
                 print(f"   ✅ 已存入工作记忆 #{cursor.lastrowid} (过期：{expires_at})")
                 
+                # 同时写入 session_messages 表
+                try:
+                    conn2 = sqlite3.connect(str(self.config.data_dir / 'cortex.db'))
+                    cursor2 = conn2.cursor()
+                    cursor2.execute('''
+                        CREATE TABLE IF NOT EXISTS session_messages (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            session_id TEXT NOT NULL,
+                            role TEXT NOT NULL,
+                            content TEXT NOT NULL,
+                            tool TEXT,
+                            created_at TEXT DEFAULT (datetime('now')),
+                            message_index INTEGER
+                        )
+                    ''')
+                    msg_idx = 0
+                    for msg in messages[:20]:
+                        msg_obj = msg.get('message', {})
+                        role = msg_obj.get('role', 'unknown')
+                        raw_content = msg_obj.get('content', '')
+                        # 提取文本（和上面一致）
+                        if isinstance(raw_content, list):
+                            text_parts = [item.get('text', '') for item in raw_content if isinstance(item, dict) and item.get('type') == 'text']
+                            text_content = '\n'.join(text_parts)
+                        elif isinstance(raw_content, str):
+                            text_content = raw_content
+                        else:
+                            text_content = str(raw_content)
+                        if text_content:
+                            cursor2.execute(
+                                'INSERT INTO session_messages (session_id, role, content, message_index) VALUES (?, ?, ?, ?)',
+                                (session_id, role, text_content[:5000], msg_idx)
+                            )
+                            msg_idx += 1
+                    conn2.commit()
+                    conn2.close()
+                    if msg_idx > 0:
+                        print(f"   ✅ 已写入 {msg_idx} 条消息到 session_messages")
+                except Exception as e:
+                    print(f"⚠️  写入 session_messages 失败: {e}")
+
                 # 同时备份到短期记忆（防止工作记忆丢失）
-                self.memory_hub.add(
-                    content=full_content,
-                    memory_type='session',
-                    importance=importance,
-                    tags=tags,
-                    metadata={'session_id': session_id, 'message_count': len(messages)}
-                )
+                try:
+                    self.memory_hub.add(
+                        content=full_content,
+                        memory_type='session',
+                        importance=importance,
+                        tags=tags,
+                        metadata={'session_id': session_id, 'message_count': len(messages)}
+                    )
+                except Exception as e:
+                    pass  # MemoryHub 不可用时无声跳过
                 
                 # 标记为已处理
                 self.state['processed_sessions'][session_id] = {
@@ -288,11 +346,29 @@ class PreferenceExtractor:
         preferences = []
         lines = content.split('\n')
         
+        # 噪音过滤：排除统计报告、cron 输出、系统日志等
+        noise_patterns = [
+            '最近1小时变更', '最近 1 小时变更', '最近2小时变更', '最近 2 小时变更',
+            'hourly-stats', 'hourly_stats', '文件变更', '文件变更',
+            '统计报告', '活动集中', '批量操作',
+            'session-scan (', 'setup-crons', 'agentTurn',
+            'cortex.db', 'USER_PREFERENCES.md', 'AGENTS.md',
+        ]
+
         for line in lines:
             line = line.strip()
             if len(line) < 10 or len(line) > 200:
                 continue
-            
+
+            # 过滤噪音行
+            is_noise = False
+            for noise in noise_patterns:
+                if noise in line:
+                    is_noise = True
+                    break
+            if is_noise:
+                continue
+
             for category, config in self.patterns.items():
                 for keyword in config['keywords']:
                     if keyword in line:
@@ -302,12 +378,13 @@ class PreferenceExtractor:
                             pref_text = pref_text.split(':', 1)[1].strip()
                         
                         preferences.append({
-                            'text': pref_text,
+                            'key': pref_text,
+                            'value': pref_text,
                             'category': category,
                             'confidence': config['confidence'],
                             'source': source,
-                            'timestamp': datetime.now().isoformat(),
-                            'status': 'pending' if config['confidence'] < 0.85 else 'confirmed'
+                            'extracted_at': datetime.now().isoformat(),
+                            'confirmed': 1 if config['confidence'] >= 0.85 else 0
                         })
                         break
         
@@ -325,32 +402,34 @@ class PreferenceExtractor:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS preferences (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                text TEXT NOT NULL,
                 category TEXT,
-                confidence REAL,
+                key TEXT NOT NULL,
+                value TEXT,
                 source TEXT,
-                timestamp TEXT,
-                status TEXT DEFAULT 'pending'
+                confidence REAL DEFAULT 0.5,
+                extracted_at TEXT DEFAULT (datetime('now')),
+                confirmed INTEGER DEFAULT 0
             )
         ''')
         
         # 去重插入
         for pref in preferences:
             # 检查是否已存在
-            cursor.execute('SELECT id FROM preferences WHERE text LIKE ?', (f'%{pref["text"][:50]}%',))
+            cursor.execute('SELECT id FROM preferences WHERE key LIKE ?', (f'%{pref["key"][:50]}%',))
             if cursor.fetchone():
                 continue
             
             cursor.execute('''
-                INSERT INTO preferences (text, category, confidence, source, timestamp, status)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO preferences (key, value, category, confidence, source, extracted_at, confirmed)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (
-                pref['text'],
+                pref['key'],
+                pref['value'],
                 pref['category'],
                 pref['confidence'],
                 pref['source'],
-                pref['timestamp'],
-                pref['status']
+                pref['extracted_at'],
+                pref['confirmed']
             ))
         
         conn.commit()
@@ -379,7 +458,7 @@ class PreferencesSync:
         cursor = conn.cursor()
         
         # 获取所有偏好
-        cursor.execute('SELECT * FROM preferences ORDER BY category, status DESC')
+        cursor.execute('SELECT * FROM preferences ORDER BY category, confirmed DESC')
         preferences = cursor.fetchall()
         conn.close()
         
@@ -420,8 +499,9 @@ class PreferencesSync:
             sections.append(f"\n## {category}\n")
             
             for pref in prefs:
-                checkbox = '[x]' if pref['status'] == 'confirmed' else '[ ]'
-                sections.append(f"- {checkbox} {pref['text']} ({int(pref['confidence']*100)}%, {pref['status']})\n")
+                checkbox = '[x]' if pref['confirmed'] else '[ ]'
+                text = str(pref['value'] or pref['key'] or '')
+                sections.append(f"- {checkbox} {text} ({int(pref['confidence']*100)}%{'，已确认' if pref['confirmed'] else ''})\n")
         
         return ''.join(sections)
 
@@ -674,10 +754,10 @@ class StatsReporter:
         cursor.execute("SELECT COUNT(*) FROM preferences")
         print(f"  • 总偏好数：{cursor.fetchone()[0]}")
         
-        cursor.execute("SELECT COUNT(*) FROM preferences WHERE status='pending'")
+        cursor.execute("SELECT COUNT(*) FROM preferences WHERE confirmed=0")
         print(f"  • 待确认：{cursor.fetchone()[0]}")
         
-        cursor.execute("SELECT COUNT(*) FROM preferences WHERE status='confirmed'")
+        cursor.execute("SELECT COUNT(*) FROM preferences WHERE confirmed=1")
         print(f"  • 已确认：{cursor.fetchone()[0]}")
         
         cursor.execute("SELECT AVG(confidence) FROM preferences WHERE confidence IS NOT NULL")

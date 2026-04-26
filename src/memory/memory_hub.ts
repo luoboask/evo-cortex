@@ -12,6 +12,7 @@ import { PluginContext, getMemoryStorageDir } from "../utils/plugin-context";
 import { SemanticSearch, SearchableDocument } from "./semantic_search";
 import { getEmbedding, initTfIdf, trainTfIdf, getEmbeddingLevel, keywordScore } from "./embedding_provider";
 import { EmbeddingCache, cosineSimilarity } from "./embedding_cache";
+import { RagEvaluator, RetrievalResult } from "../knowledge/rag_evaluator";
 import type { EmbeddingConfig, RetentionPolicy } from "../utils/config-validator";
 
 // ========== 配置 ==========
@@ -29,7 +30,7 @@ const DEFAULT_RETENTION: RetentionPolicy = { daily: 14, weekly: 8, monthly: 2 };
 export interface MemoryEntry {
   id?: string;
   content: string;
-  type: "session" | "daily" | "weekly" | "monthly" | "compressed";
+  type: "session" | "daily" | "weekly" | "monthly" | "compressed" | "working_session" | "long_term";
   timestamp: string;
   metadata?: Record<string, any>;
   embedding?: number[];
@@ -66,6 +67,7 @@ export class MemoryHub {
   private storageDir: string;
   private semanticSearch: SemanticSearch;
   private embeddingCache: EmbeddingCache;
+  private ragEval: RagEvaluator;
   private embeddingAvailable: boolean = false;
   private lastEmbeddingAttempt: number = 0;
   private embeddingRetryInterval: number = 5 * 60 * 1000;
@@ -106,6 +108,7 @@ export class MemoryHub {
       : undefined;
 
     this.semanticSearch = new SemanticSearch(embeddingFunc, 5000);
+    this.ragEval = new RagEvaluator(ctx);
     // 异步加载，不阻塞构造函数
     this.load().catch(err => console.error('[MemoryHub] Load error:', err));
   }
@@ -145,6 +148,7 @@ export class MemoryHub {
    * 使用高层结果引导低层搜索范围，避免全量扫描
    */
   async search(query: string, topK?: number): Promise<MemorySearchResult[]> {
+    const startTime = Date.now();
     const limit = topK || this.config.top_k;
     if (this.memories.length === 0) return [];
 
@@ -200,7 +204,23 @@ export class MemoryHub {
       return b.score - a.score;
     });
 
-    return finalResults.slice(0, limit);
+    const final = finalResults.slice(0, limit);
+    const latency = Date.now() - startTime;
+
+    // 记录 RAG 检索指标（同步返回，内部自动保存状态）
+    this.ragEval.recordRetrieval(
+      query,
+      final.map(r => ({
+        id: r.entry.id!,
+        content: r.entry.content,
+        score: r.score,
+        source: r.source || (this.embeddingConfig.enabled ? 'embedding' : 'keyword'),
+        layer: r.layer
+      })),
+      latency
+    );
+
+    return final;
   }
 
   /** 搜索特定层级（支持按日期范围过滤） */
@@ -238,7 +258,9 @@ export class MemoryHub {
 
   /** 搜索日/会话层（支持语义搜索和日期过滤） */
   private async searchDetailed(query: string, limit: number, dateFilter?: Set<string>): Promise<MemorySearchResult[]> {
-    let detailedMemories = this.memories.filter(m => m.type === 'session' || m.type === 'daily');
+    let detailedMemories = this.memories.filter(m =>
+      m.type === 'session' || m.type === 'daily' || m.type === 'working_session' || m.type === 'long_term'
+    );
     
     // 日期过滤：只保留相关日期的记录，大幅减少搜索范围
     if (dateFilter && dateFilter.size > 0) {
@@ -560,6 +582,42 @@ export class MemoryHub {
     return entries;
   }
 
+  /**
+   * 读取最近 N 天的 daily notes 标题摘要（轻量，不调用 embedding）
+   * 用于在对话前自动注入上下文
+   */
+  async getRecentDailySummary(days: number = 2): Promise<string | null> {
+    const today = new Date();
+    const files: string[] = [];
+    for (let i = 0; i < days; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      const fname = d.toISOString().slice(0, 10) + '.md';
+      const fpath = path.join(this.storageDir, fname);
+      if (fs.existsSync(fpath)) files.push(fpath);
+    }
+
+    if (files.length === 0) return null;
+
+    // 只提取 ## 标题行，避免注入太多内容
+    const snippets: string[] = [];
+    for (const f of files) {
+      try {
+        const content = fs.readFileSync(f, 'utf-8');
+        const headers = content.split('\n')
+          .filter(l => l.startsWith('## ') || l.startsWith('### '))
+          .slice(0, 8);  // 每天最多取 8 个标题
+        if (headers.length > 0) {
+          const date = path.basename(f, '.md');
+          snippets.push(`[${date}]\n${headers.join('\n')}`);
+        }
+      } catch { /* skip */ }
+    }
+
+    if (snippets.length === 0) return null;
+    return snippets.join('\n\n');
+  }
+
   private ensureDirectory(dir: string): void {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   }
@@ -573,6 +631,29 @@ export class MemoryHub {
     }
     const top = [...topics.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([t]) => t).join(', ');
     return `[${granularity.toUpperCase()} SUMMARY] Agent: ${this.ctx.agentId}. Topics: ${top}. Entries: ${entries.length}`;
+  }
+
+  // ========== RAG 评估 ==========
+
+  /**
+   * 获取当前 RAG 调优参数
+   */
+  getRagParams() {
+    return this.ragEval.getTuningParams();
+  }
+
+  /**
+   * 触发一次 RAG 评估并返回报告
+   */
+  async evaluateRag() {
+    return this.ragEval.evaluateAndTune();
+  }
+
+  /**
+   * 重置 RAG 评估状态
+   */
+  resetRagEval() {
+    this.ragEval.reset();
   }
 }
 

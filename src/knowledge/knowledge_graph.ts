@@ -399,4 +399,185 @@ export class KnowledgeGraph {
   private ensureDirectory(dirPath: string): void {
     if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true });
   }
+
+  // ========== 图算法 ==========
+
+  /**
+   * 查找两个实体之间的最短路径（BFS）
+   * @returns 路径数组 [fromId, ...intermediate, toId] 或 null
+   */
+  findPath(fromId: string, toId: string, relationTypes?: string[]): string[] | null {
+    if (fromId === toId) return [fromId];
+    if (!this.entities.has(fromId) || !this.entities.has(toId)) return null;
+
+    const allowedTypes = relationTypes ? new Set(relationTypes) : null;
+    const visited = new Set<string>();
+    const queue: Array<{ id: string; path: string[] }> = [{ id: fromId, path: [fromId] }];
+
+    while (queue.length > 0) {
+      const { id, path } = queue.shift()!;
+
+      // 找邻居（过滤关系类型）
+      const neighbors = this.relations
+        .filter(r => {
+          if (allowedTypes && !allowedTypes.has(r.type)) return false;
+          return r.from === id || r.to === id;
+        })
+        .map(r => r.from === id ? r.to : r.from);
+
+      for (const neighbor of neighbors) {
+        if (neighbor === toId) return [...path, neighbor];
+        if (visited.has(neighbor)) continue;
+        visited.add(neighbor);
+        queue.push({ id: neighbor, path: [...path, neighbor] });
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * 计算度中心性（每个实体的连接数）
+   * @returns 按中心性排序的实体列表 { id, degree, centrality }
+   */
+  degreeCentrality(): Array<{ id: string; name: string; degree: number; centrality: number }> {
+    const degree = new Map<string, number>();
+
+    // 初始化所有实体度为 0
+    for (const e of this.entities.values()) degree.set(e.id, 0);
+
+    // 统计关系数（无向图）
+    for (const r of this.relations) {
+      degree.set(r.from, (degree.get(r.from) || 0) + 1);
+      degree.set(r.to, (degree.get(r.to) || 0) + 1);
+    }
+
+    const n = this.entities.size;
+    return [...degree.entries()]
+      .map(([id, deg]) => ({
+        id,
+        name: this.entities.get(id)?.name || id,
+        degree: deg,
+        centrality: n > 1 ? deg / (n - 1) : 0
+      }))
+      .sort((a, b) => b.degree - a.degree);
+  }
+
+  /**
+   * 查找连通分量（图是否分成多个独立子图）
+   * @returns 连通分量列表，每个分量包含实体 ID 数组
+   */
+  connectedComponents(): string[][] {
+    const visited = new Set<string>();
+    const components: string[][] = [];
+
+    for (const entityId of this.entities.keys()) {
+      if (visited.has(entityId)) continue;
+
+      // BFS 遍历这个分量
+      const component: string[] = [];
+      const queue = [entityId];
+      visited.add(entityId);
+
+      while (queue.length > 0) {
+        const id = queue.shift()!;
+        component.push(id);
+
+        // 找邻居（无向）
+        const neighbors = this.relations
+          .filter(r => r.from === id || r.to === id)
+          .map(r => r.from === id ? r.to : r.from);
+
+        for (const neighbor of neighbors) {
+          if (!visited.has(neighbor)) {
+            visited.add(neighbor);
+            queue.push(neighbor);
+          }
+        }
+      }
+
+      components.push(component);
+    }
+
+    return components;
+  }
+
+  /**
+   * 导出图谱为 JSON（含实体、关系、统计信息）
+   */
+  exportGraph(): {
+    entities: KnowledgeEntity[];
+    relations: KnowledgeRelation[];
+    stats: {
+      totalEntities: number;
+      totalRelations: number;
+      byType: Record<string, number>;
+      relationTypes: Record<string, number>;
+      avgConfidence: number;
+      connectedEntities: number;
+    };
+    centrality: Array<{ id: string; name: string; degree: number; centrality: number }>;
+    components: string[][];
+    exportedAt: string;
+  } {
+    return {
+      entities: [...this.entities.values()],
+      relations: [...this.relations],
+      stats: this.getGraphStats(),
+      centrality: this.degreeCentrality().slice(0, 10), // top 10
+      components: this.connectedComponents(),
+      exportedAt: new Date().toISOString()
+    };
+  }
+
+  /**
+   * 导出图谱为 Markdown 可读格式
+   */
+  exportMarkdown(): string {
+    const lines: string[] = [
+      `# Knowledge Graph - ${this.ctx.agentId}`,
+      ``,
+      `## 统计`,
+      ``,
+    ];
+
+    const stats = this.getGraphStats();
+    lines.push(`- 实体总数: ${stats.totalEntities}`);
+    lines.push(`- 关系总数: ${stats.totalRelations}`);
+    lines.push(`- 平均置信度: ${(stats.avgConfidence * 100).toFixed(1)}%`);
+    lines.push(`- 已连接实体: ${stats.connectedEntities}`);
+    lines.push(``);
+
+    // 实体按类型分组
+    lines.push(`## 实体`);
+    lines.push(``);
+    for (const [type, entities] of Object.entries(
+      [...this.entities.values()].reduce((acc, e) => {
+        (acc[e.type] ||= []).push(e);
+        return acc;
+      }, {} as Record<string, KnowledgeEntity[]>)
+    )) {
+      lines.push(`### ${type} (${entities.length})`);
+      lines.push(``);
+      for (const e of entities) {
+        lines.push(`- **${e.name}** \`[${e.id.slice(-9)}]\``);
+        if (e.description) lines.push(`  ${e.description}`);
+      }
+      lines.push(``);
+    }
+
+    // 关系
+    lines.push(`## 关系`);
+    lines.push(``);
+    lines.push(`| From | Type | To | Confidence |`);
+    lines.push(`|------|------|----|------------|`);
+    for (const r of this.relations.sort((a, b) => b.confidence - a.confidence)) {
+      const fromName = this.entities.get(r.from)?.name || r.from.slice(-9);
+      const toName = this.entities.get(r.to)?.name || r.to.slice(-9);
+      lines.push(`| ${fromName} | ${r.type} | ${toName} | ${(r.confidence * 100).toFixed(0)}% |`);
+    }
+    lines.push(``);
+
+    return lines.join('\n');
+  }
 }

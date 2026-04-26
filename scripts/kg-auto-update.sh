@@ -89,7 +89,7 @@ for f in "$SCAN_DIR"/*.md "$SCAN_DIR"/**/*.md; do
   if [ -f "$f" ]; then
     FILE_DATE=$(stat -f "%Sm" -t "%Y-%m-%d" "$f" 2>/dev/null || stat -c "%y" "$f" 2>/dev/null | cut -d' ' -f1)
     THREE_DAYS_AGO=$(date -v-3d +%Y-%m-%d 2>/dev/null || date -d "3 days ago" +%Y-%m-%d)
-    if [ "$FILE_DATE" \>= "$THREE_DAYS_AGO" ]; then
+    if [[ "$FILE_DATE" > "$THREE_DAYS_AGO" ]]; then
       cat "$f" >> "$TEMP_FILE"
       echo "  📄 $(basename "$f")"
     fi

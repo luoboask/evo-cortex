@@ -2,7 +2,12 @@
  * 网络知识爬取器
  *
  * 抓取网页内容，提取正文和关键词
+ * 带文件系统缓存，默认 24 小时过期
  */
+
+import * as fs from 'fs';
+import * as path from 'path';
+import * as crypto from 'crypto';
 
 export interface CrawledPage {
   url: string;
@@ -19,17 +24,61 @@ export interface CrawlConfig {
   timeout?: number;
   maxRetries?: number;
   cacheDir?: string;
+  cacheTtlMs?: number;       // 缓存过期时间（默认 24h）
+  maxCacheEntries?: number;  // 最大缓存条目数（默认 500）
 }
 
 export class WebCrawler {
   private config: Required<CrawlConfig>;
+  private inMemoryCache: Map<string, { page: CrawledPage; expiresAt: number }>;
 
   constructor(config?: CrawlConfig) {
     this.config = {
       timeout: config?.timeout || 30000,
       maxRetries: config?.maxRetries || 3,
-      cacheDir: config?.cacheDir || '/tmp/web-cache'
+      cacheDir: config?.cacheDir || '/tmp/web-cache',
+      cacheTtlMs: config?.cacheTtlMs || 24 * 60 * 60 * 1000,
+      maxCacheEntries: config?.maxCacheEntries || 500
     };
+    this.inMemoryCache = new Map();
+    this.ensureCacheDir();
+  }
+
+  /** 确保缓存目录存在 */
+  private ensureCacheDir(): void {
+    if (!fs.existsSync(this.config.cacheDir)) {
+      fs.mkdirSync(this.config.cacheDir, { recursive: true });
+    }
+  }
+
+  /** 根据 URL 生成缓存文件名（SHA-256 哈希） */
+  private getCacheFilePath(url: string): string {
+    const hash = crypto.createHash('sha256').update(url).digest('hex').slice(0, 16);
+    return path.join(this.config.cacheDir, `${hash}.json`);
+  }
+
+  /** 写入缓存元数据索引（用于 LRU 清理） */
+  private updateCacheIndex(url: string, filePath: string): void {
+    const indexPath = path.join(this.config.cacheDir, '_index.json');
+    let index: Array<{ url: string; file: string; at: number }> = [];
+    try {
+      if (fs.existsSync(indexPath)) {
+        index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'));
+      }
+    } catch { /* ignore */ }
+    // 移除旧条目
+    index = index.filter(e => e.url !== url);
+    index.push({ url, file: filePath, at: Date.now() });
+    // 限制索引大小
+    if (index.length > this.config.maxCacheEntries) {
+      const removed = index.splice(0, index.length - this.config.maxCacheEntries);
+      for (const r of removed) {
+        try { fs.unlinkSync(r.file); } catch { /* ignore */ }
+      }
+    }
+    try {
+      fs.writeFileSync(indexPath, JSON.stringify(index), 'utf-8');
+    } catch { /* ignore */ }
   }
 
   /**
@@ -257,18 +306,52 @@ export class WebCrawler {
   }
 
   /**
-   * 获取缓存
+   * 获取缓存：内存 → 文件系统
    */
   private getCache(url: string): CrawledPage | null {
-    // TODO: 实现文件系统缓存
-    return null;
+    // 1. 内存缓存
+    const memCached = this.inMemoryCache.get(url);
+    if (memCached && memCached.expiresAt > Date.now()) {
+      return memCached.page;
+    }
+    if (memCached) {
+      this.inMemoryCache.delete(url);
+    }
+
+    // 2. 文件系统缓存
+    const cacheFile = this.getCacheFilePath(url);
+    if (!fs.existsSync(cacheFile)) return null;
+
+    try {
+      const raw = fs.readFileSync(cacheFile, 'utf-8');
+      const data = JSON.parse(raw);
+      // 检查过期
+      if (Date.now() - data.cachedAt > this.config.cacheTtlMs) {
+        fs.unlinkSync(cacheFile);
+        return null;
+      }
+      // 加载回内存
+      this.inMemoryCache.set(url, { page: data.page, expiresAt: data.cachedAt + this.config.cacheTtlMs });
+      return data.page;
+    } catch {
+      try { fs.unlinkSync(cacheFile); } catch { /* ignore */ }
+      return null;
+    }
   }
 
   /**
-   * 设置缓存
+   * 设置缓存：内存 + 文件系统
    */
   private setCache(url: string, page: CrawledPage): void {
-    // TODO: 实现文件系统缓存
+    // 内存缓存
+    this.inMemoryCache.set(url, { page, expiresAt: Date.now() + this.config.cacheTtlMs });
+
+    // 文件系统缓存
+    const cacheFile = this.getCacheFilePath(url);
+    try {
+      fs.writeFileSync(cacheFile, JSON.stringify({ page, cachedAt: Date.now() }), 'utf-8');
+      this.updateCacheIndex(url, cacheFile);
+    } catch { /* ignore - cache write is non-critical */ }
   }
 
   /**

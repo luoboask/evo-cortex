@@ -1,4 +1,37 @@
-## v1.2.1 (2026-04-24)
+## v1.3.0 (2026-04-26)
+
+### 对标 evo-agents 差距修复 (Gap Analysis)
+
+#### RAG 检索评估 + 自动调优 (Gap #2)
+- **RagEvaluator** (`src/knowledge/rag_evaluator.ts`)
+  - 自动记录每次检索指标：命中率、相关度、覆盖率、延迟、keyword 降级比例
+  - 每 20 次检索自动评估并调优参数：
+    - topK 自适应（命中率低 → 扩大，质量好 → 精确化）
+    - 搜索层自适应（覆盖度低 → 添加缺失层）
+    - embedding 模式自适应（不可用降级 keyword，恢复后切回 auto）
+    - 延迟过高 → 缩减范围保证性能
+  - 质量趋势检测（improving / stable / degrading）
+  - 状态持久化到 `rag_eval.json`
+- **MemoryHub 集成**
+  - `search()` 自动记录检索指标到 RagEvaluator
+  - `getRagParams()` / `evaluateRag()` / `resetRagEval()` 公开方法
+
+#### 知识图谱增强 (Gap #3 补充)
+- **路径发现** — BFS 最短路径 `findPath(fromId, toId, relationTypes?)`
+- **度中心性分析** — `degreeCentrality()` 识别核心实体（按连接数排序）
+- **连通分量检测** — `connectedComponents()` 检测独立子图
+- **图导出** — `exportGraph()` (JSON) + `exportMarkdown()` (可读格式)
+
+#### Embedding 批量优化
+- **批量 API 调用** — `getApiEmbeddingBatch()` 支持最多 25 条/请求（DashScope 原生支持）
+- **请求去重** — 相同文本的并发请求共享 Promise，避免重复 API 调用
+- **分批处理** — 超过 25 条自动拆分，超大规模请求自动处理
+- **批量入口** — `getEmbeddingsBatch()` 统一入口，API 失败自动降级本地
+- **超时优化** — API 超时从 10s → 15s（批量请求需要更多时间）
+
+#### Skills 目录
+- `skills/memory-search/SKILL.md` — 分层搜索 + RAG 评估使用说明
+- `skills/self-evolution/SKILL.md` — 分形思考 / 知识整理 / 主动学习说明
 
 ### 🎯 新增功能
 - ✅ 工作记忆双重写入机制（messageReceivedHook + session-scan）

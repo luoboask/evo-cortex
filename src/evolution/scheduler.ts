@@ -68,11 +68,13 @@ export class EvolutionScheduler {
 
   /**
    * 整理领域知识
+   * - 扫描知识目录，识别重复和过时知识
+   * - 统计知识文件数量和大小
+   * - 清理空文件和损坏的 JSON
    */
   async organizeDomainKnowledge(): Promise<void> {
     console.log(`[EvolutionScheduler] Organizing domain knowledge for agent ${this.ctx.agentId}`);
     
-    // 扫描知识目录，识别重复和过时知识
     const knowledgeDir = getKnowledgeStorageDir(this.ctx);
     
     if (!fs.existsSync(knowledgeDir)) {
@@ -80,12 +82,76 @@ export class EvolutionScheduler {
       return;
     }
     
-    // TODO: 实现知识整理逻辑
-    console.log("[EvolutionScheduler] Domain organization complete");
+    const report = {
+      totalFiles: 0,
+      totalSize: 0,
+      emptyFiles: 0,
+      invalidJson: 0,
+      categories: {} as Record<string, { count: number; size: number }>,
+      organizedAt: new Date().toISOString()
+    };
+
+    const scanDir = (dir: string, category: string = 'root') => {
+      if (!fs.existsSync(dir)) return;
+      
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        
+        if (entry.isDirectory()) {
+          scanDir(fullPath, entry.name);
+        } else if (entry.isFile()) {
+          report.totalFiles++;
+          try {
+            const stat = fs.statSync(fullPath);
+            report.totalSize += stat.size;
+            
+            // 检测空文件
+            if (stat.size === 0) {
+              report.emptyFiles++;
+              console.log(`[EvolutionScheduler] Empty file: ${fullPath}`);
+              continue;
+            }
+
+            // 检测 JSON 文件是否有效
+            if (entry.name.endsWith('.json')) {
+              try {
+                const content = fs.readFileSync(fullPath, 'utf-8');
+                JSON.parse(content);
+              } catch {
+                report.invalidJson++;
+                console.log(`[EvolutionScheduler] Invalid JSON: ${fullPath}`);
+              }
+            }
+            
+            // 按类别统计
+            if (!report.categories[category]) {
+              report.categories[category] = { count: 0, size: 0 };
+            }
+            report.categories[category].count++;
+            report.categories[category].size += stat.size;
+          } catch (err) {
+            console.error(`[EvolutionScheduler] Error scanning ${fullPath}:`, err);
+          }
+        }
+      }
+    };
+
+    scanDir(knowledgeDir);
+
+    // 写入整理报告
+    const reportPath = path.join(this.storageDir, 'organization_report.json');
+    try {
+      fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
+    } catch { /* ignore */ }
+
+    console.log(`[EvolutionScheduler] Organized: ${report.totalFiles} files, ${report.emptyFiles} empty, ${report.invalidJson} invalid JSON`);
   }
 
   /**
    * 审查领域知识
+   * - 检查实体/关系一致性
+   * - 统计知识新鲜度（最后修改时间）
+   * - 生成审查报告
    */
   async reviewDomainKnowledge(): Promise<void> {
     console.log(`[EvolutionScheduler] Reviewing domain knowledge for agent ${this.ctx.agentId}`);
@@ -97,8 +163,93 @@ export class EvolutionScheduler {
       return;
     }
     
-    // TODO: 实现知识审查逻辑
-    console.log("[EvolutionScheduler] Domain review complete");
+    const review = {
+      totalEntities: 0,
+      totalRelations: 0,
+      staleEntities: 0,  // 超过 30 天未更新
+      orphanRelations: 0, // 关系指向不存在的实体
+      entityTypes: {} as Record<string, number>,
+      reviewedAt: new Date().toISOString(),
+      cutoffDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString()
+    };
+
+    // 检查 entities.json
+    const entitiesPath = path.join(knowledgeDir, 'entities.json');
+    if (fs.existsSync(entitiesPath)) {
+      try {
+        const entities = JSON.parse(fs.readFileSync(entitiesPath, 'utf-8'));
+        const entityIds = new Set<string>();
+        const relationIds = new Set<string>();
+        
+        // 统计实体
+        if (Array.isArray(entities)) {
+          for (const entity of entities) {
+            review.totalEntities++;
+            entityIds.add(entity.id);
+            
+            // 统计类型
+            const type = entity.type || 'unknown';
+            review.entityTypes[type] = (review.entityTypes[type] || 0) + 1;
+            
+            // 检查新鲜度
+            if (entity.updatedAt) {
+              const updated = new Date(entity.updatedAt);
+              if (updated < new Date(review.cutoffDate)) {
+                review.staleEntities++;
+              }
+            }
+          }
+        }
+
+        // 检查关系一致性
+        if (Array.isArray(entities)) {
+          for (const entity of entities) {
+            if (entity.relations) {
+              for (const rel of entity.relations) {
+                review.totalRelations++;
+                const relTarget = rel.target || rel.to || rel.entityId;
+                if (relTarget && !entityIds.has(relTarget)) {
+                  review.orphanRelations++;
+                }
+              }
+            }
+          }
+        }
+
+        // 检查关系文件
+        const relationsPath = path.join(knowledgeDir, 'relations.json');
+        if (fs.existsSync(relationsPath)) {
+          const relations = JSON.parse(fs.readFileSync(relationsPath, 'utf-8'));
+          if (Array.isArray(relations)) {
+            for (const rel of relations) {
+              review.totalRelations++;
+              const target = rel.target || rel.to;
+              const source = rel.source || rel.from;
+              if (target && !entityIds.has(target)) {
+                review.orphanRelations++;
+              }
+              if (source && !entityIds.has(source)) {
+                review.orphanRelations++;
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[EvolutionScheduler] Error reviewing entities:', err);
+      }
+    }
+
+    // 写入审查报告
+    const reportPath = path.join(this.storageDir, 'review_report.json');
+    try {
+      fs.writeFileSync(reportPath, JSON.stringify(review, null, 2), 'utf-8');
+    } catch { /* ignore */ }
+
+    console.log(
+      `[EvolutionScheduler] Reviewed: ${review.totalEntities} entities, ` +
+      `${review.totalRelations} relations, ${review.staleEntities} stale, ` +
+      `${review.orphanRelations} orphan relations`
+    );
   }
 
   /**

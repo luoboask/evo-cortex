@@ -1,5 +1,7 @@
 import type { OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plugin-sdk/core";
 import { Type } from "@sinclair/typebox";
+import * as fs from 'fs';
+import * as path from 'path';
 import { MemoryHub } from "./memory/memory_hub";
 import { KnowledgeGraph } from "./knowledge/knowledge_graph";
 import { EvolutionScheduler } from "./evolution/scheduler";
@@ -10,6 +12,7 @@ import {
 } from "./hooks";
 import { MemoryIndexer } from "./memory/memory_indexer";
 import { SessionScanner } from "./memory/session_scanner";
+import { scanNewSessions } from "./utils/session_scanner";
 import { WebCrawler } from "./knowledge/web_crawler";
 import { buildPluginContext, getMemoryStorageDir, getKnowledgeStorageDir, getDataDir } from "./utils/plugin-context";
 import { getLogger } from "./utils/logger";
@@ -564,7 +567,98 @@ const plugin = {
 //      }
 //    );
 //
-//    // 3. before:tool_call hook - 工具调用前安全检查
+    // ========== Hooks ==========
+
+    // 1. message:received — 极简版：注入用户偏好 + 最近记忆标题摘要（<5ms，不搜索不写入）
+    const prefCache = new Map<string, { content: string; mtime: number; ts: number }>();
+    const PREF_TTL = 5 * 60 * 1000;
+
+    async function loadPrefs(workspaceDir: string, agentId: string): Promise<string | null> {
+      const prefFile = path.join(workspaceDir, 'USER_PREFERENCES.md');
+      const cacheKey = `${agentId}:${prefFile}`;
+      const cached = prefCache.get(cacheKey);
+      if (cached && Date.now() - cached.ts < PREF_TTL) {
+        try {
+          const stat = fs.statSync(prefFile);
+          if (stat.mtimeMs === cached.mtime) return cached.content;
+        } catch { /* file deleted */ }
+      }
+      if (!fs.existsSync(prefFile)) { prefCache.delete(cacheKey); return null; }
+      try {
+        const content = fs.readFileSync(prefFile, 'utf-8');
+        const stat = fs.statSync(prefFile);
+        const checked = content.match(/\[x\].+/g)?.map(l => l.replace(/\[x\]\s*/, '').trim()).filter(Boolean) || [];
+        if (checked.length === 0) return null;
+        const injection = `\n=== 用户偏好 ===\n${checked.join('\n')}\n=== 结束 ===\n`;
+        prefCache.set(cacheKey, { content: injection, mtime: stat.mtimeMs, ts: Date.now() });
+        return injection;
+      } catch { return null; }
+    }
+
+    api.on(
+      "message_received",
+      async (message: any, hookCtx: any) => {
+        try {
+          // message_received hookCtx does NOT contain agentId/workspaceDir
+          // Parse agentId from sessionKey (format: "agent:{agentId}:{suffix}")
+          const sessionKey = hookCtx?.sessionKey || '';
+          const parts = sessionKey.split(':');
+          const agentId = parts.length >= 2 ? parts[1] : 'main';
+          const workspaceDir = path.join(process.env.HOME || '', '.openclaw', `workspace-${agentId}`);
+
+          const { memoryHub } = getOrCreateHub(agentId, { agentId, workspaceDir } as any);
+          const injectionParts: string[] = [];
+
+          // 用户偏好（缓存，~1ms）
+          if (fs.existsSync(workspaceDir)) {
+            const prefs = await loadPrefs(workspaceDir, agentId);
+            if (prefs) injectionParts.push(prefs);
+          }
+
+          // 按需 session 扫描（异步，不阻塞回复）
+          if (agentId && agentId !== 'main') {
+            const openclawRoot = path.join(process.env.HOME || '', '.openclaw');
+            const sessionsPath = path.join(openclawRoot, 'agents', agentId, 'sessions');
+            const dataDir = path.join(workspaceDir, 'data', agentId);
+            const prefFile = path.join(workspaceDir, 'memory', agentId, 'USER_PREFERENCES.md');
+            const hookLogger = getLogger({ component: 'session_scanner' });
+
+            // fire-and-forget：不阻塞 hook 返回
+            scanNewSessions(agentId, dataDir, sessionsPath, prefFile, hookLogger)
+              .then(r => {
+                if (r.new_sessions > 0) {
+                  hookLogger.info(`scan: ${r.new_sessions} new, ${r.messages_written} msgs, ${r.preferences_extracted} prefs in ${r.duration_ms}ms`);
+                }
+              })
+              .catch(err => hookLogger.error('scan failed', err));
+          }
+
+          // 最近记忆标题摘要（MemoryHub 读取，~2ms）
+          const summary = await memoryHub.getRecentDailySummary(2);
+          if (summary) injectionParts.push(`\n=== 最近记忆 ===\n${summary}\n=== 结束 ===\n`);
+
+          if (injectionParts.length === 0) return {};
+          return { system_prompt_addition: injectionParts.join('\n') };
+        } catch (error: any) {
+          logger.error('light_received hook failed', error);
+          return {};
+        }
+      },
+      {
+        name: "evo-cortex-light-received",
+        description: "Inject user preferences and recent memory summary (lightweight, <5ms)",
+        entry: {
+          hook: {
+            name: "evo-cortex-light-received",
+            description: "Inject user preferences and recent memory summary (lightweight, <5ms)"
+          }
+        }
+      }
+    );
+
+    // 2. message:sent — 已禁用（按用户需求，不影响对话）
+
+    // 3. before:tool_call hook — 工具调用前安全检查
     api.registerHook(
       "before:tool_call",
       async (toolCall: any) => {
