@@ -492,79 +492,79 @@ const plugin = {
       return cached;
     }
 
-    // 1. message_received hook - 保存对话到记忆
-    api.registerHook(
-      "message:received",
-      async (message: any, hookCtx: any) => {
-        try {
-          const pluginCtx = buildPluginContext(hookCtx || {}, api);
-          const hookLogger = getLogger({
-            agentId: pluginCtx.agentId,
-            component: 'message_received',
-            verbose: config.verbose
-          });
+//    // 1. message_received hook - 保存对话到记忆
+//    api.registerHook(
+//      "message:received",
+//      async (message: any, hookCtx: any) => {
+//        try {
+//          const pluginCtx = buildPluginContext(hookCtx || {}, api);
+//          const hookLogger = getLogger({
+//            agentId: pluginCtx.agentId,
+//            component: 'message_received',
+//            verbose: config.verbose
+//          });
+//
+//          const { memoryHub, knowledgeGraph } = getOrCreateHub(pluginCtx.agentId, pluginCtx);
+//
+//          const result = await messageReceivedHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
+//
+//          if (result.system_prompt_addition) {
+//            hookLogger.hook('message_received', `Enhanced with ${result.memories?.length || 0} memories, ${result.knowledge?.length || 0} knowledge`);
+//          }
+//
+//          return result;
+//        } catch (error: any) {
+//          logger.error('message_received hook failed', error);
+//          return {};
+//        }
+//      },
+//      {
+//        name: "evo-cortex-message-received",
+//        description: "Save conversation to memory and enhance context with knowledge graph",
+//        entry: {
+//          hook: {
+//            name: "evo-cortex-message-received",
+//            description: "Save conversation to memory and enhance context with knowledge graph"
+//          }
+//        }
+//      }
+//    );
 
-          const { memoryHub, knowledgeGraph } = getOrCreateHub(pluginCtx.agentId, pluginCtx);
-
-          const result = await messageReceivedHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
-
-          if (result.system_prompt_addition) {
-            hookLogger.hook('message_received', `Enhanced with ${result.memories?.length || 0} memories, ${result.knowledge?.length || 0} knowledge`);
-          }
-
-          return result;
-        } catch (error: any) {
-          logger.error('message_received hook failed', error);
-          return {};
-        }
-      },
-      {
-        name: "evo-cortex-message-received",
-        description: "Save conversation to memory and enhance context with knowledge graph",
-        entry: {
-          hook: {
-            name: "evo-cortex-message-received",
-            description: "Save conversation to memory and enhance context with knowledge graph"
-          }
-        }
-      }
-    );
-
-    // 2. message:sent hook - 消息发出后存储记忆、提取概念
-    api.registerHook(
-      "message:sent",
-      async (message: any, hookCtx: any) => {
-        try {
-          const pluginCtx = buildPluginContext(hookCtx || {}, api);
-          const hookLogger = getLogger({
-            agentId: pluginCtx.agentId,
-            component: 'message_sent',
-            verbose: config.verbose
-          });
-          const { memoryHub, knowledgeGraph } = getOrCreateHub(pluginCtx.agentId, pluginCtx);
-
-          const result = await messageSentHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
-          hookLogger.hook('message_sent', 'Memory stored after message sent');
-
-          return result;
-        } catch (error: any) {
-          logger.error('message_sent hook failed', error);
-          return {};
-        }
-      },
-      {
-        name: "evo-cortex-message-sent",
-        description: "Store memory and extract concepts after message sent",
-        entry: {
-          hook: {
-            name: "evo-cortex-message-sent",
-            description: "Store memory and extract concepts after message sent"
-          }
-        }
-      }
-    );
-
-    // 3. before:tool_call hook - 工具调用前安全检查
+//    // 2. message:sent hook - 消息发出后存储记忆、提取概念
+//    api.registerHook(
+//      "message:sent",
+//      async (message: any, hookCtx: any) => {
+//        try {
+//          const pluginCtx = buildPluginContext(hookCtx || {}, api);
+//          const hookLogger = getLogger({
+//            agentId: pluginCtx.agentId,
+//            component: 'message_sent',
+//            verbose: config.verbose
+//          });
+//          const { memoryHub, knowledgeGraph } = getOrCreateHub(pluginCtx.agentId, pluginCtx);
+//
+//          const result = await messageSentHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
+//          hookLogger.hook('message_sent', 'Memory stored after message sent');
+//
+//          return result;
+//        } catch (error: any) {
+//          logger.error('message_sent hook failed', error);
+//          return {};
+//        }
+//      },
+//      {
+//        name: "evo-cortex-message-sent",
+//        description: "Store memory and extract concepts after message sent",
+//        entry: {
+//          hook: {
+//            name: "evo-cortex-message-sent",
+//            description: "Store memory and extract concepts after message sent"
+//          }
+//        }
+//      }
+//    );
+//
+//    // 3. before:tool_call hook - 工具调用前安全检查
     api.registerHook(
       "before:tool_call",
       async (toolCall: any) => {

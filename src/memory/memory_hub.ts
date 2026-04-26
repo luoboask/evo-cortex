@@ -140,41 +140,95 @@ export class MemoryHub {
   // ========== 分层搜索 ==========
 
   /**
-   * 分层搜索：Monthly → Weekly → Daily → Session
-   * 先从高层找概述，再从底层找细节
+   * 分层搜索：Monthly → Weekly → Daily → Full
+   * 自上而下遍历：月度概述 → 周度概述 → 日度记录 → 完整会话内容
+   * 使用高层结果引导低层搜索范围，避免全量扫描
    */
   async search(query: string, topK?: number): Promise<MemorySearchResult[]> {
     const limit = topK || this.config.top_k;
     if (this.memories.length === 0) return [];
 
-    // 按月记忆搜索
+    const results: MemorySearchResult[] = [];
+
+    // 第一层：月度概述 - 定位相关时间段，获取宏观背景 (权重 0.2)
     const monthly = this.searchByLayer('monthly', query, Math.ceil(limit * 0.2));
+    results.push(...monthly);
 
-    // 按周记忆搜索
-    const weekly = this.searchByLayer('weekly', query, Math.ceil(limit * 0.3));
+    // 第二层：周度概述 - 在月度结果覆盖的时间范围内精查 (权重 0.3)
+    const monthlyTimestamps = new Set(monthly.map(r => this.getYearMonth(r.entry.timestamp)));
+    const weekly = this.searchByLayer('weekly', query, Math.ceil(limit * 0.3), monthlyTimestamps.size > 0 ? monthlyTimestamps : undefined);
+    results.push(...weekly);
 
-    // 按日/会话记忆搜索（语义 + 降级）
-    const dailyResults = await this.searchDetailed(query, limit);
-
-    // 合并结果：月 → 周 → 日
-    const results: MemorySearchResult[] = [...monthly, ...weekly, ...dailyResults];
-    // 去重：相同内容只保留最高分
-    const seen = new Set<string>();
-    const unique: MemorySearchResult[] = [];
-    for (const r of results) {
-      const key = r.entry.id!;
-      if (!seen.has(key)) {
-        seen.add(key);
-        unique.push(r);
+    // 第三层：日度记录 - 在周度覆盖的日期内搜索详细信息 (权重 0.5)
+    const relevantDates = new Set<string>();
+    for (const m of monthly) {
+      const date = new Date(m.entry.timestamp).toISOString().split('T')[0];
+      relevantDates.add(date);
+    }
+    for (const w of weekly) {
+      if (w.entry.metadata?.dateRange) {
+        const [start, end] = w.entry.metadata.dateRange;
+        const s = new Date(start), e = new Date(end);
+        while (s <= e) {
+          relevantDates.add(s.toISOString().split('T')[0]);
+          s.setDate(s.getDate() + 1);
+        }
       }
     }
 
-    return unique.slice(0, limit);
+    const dailyResults = await this.searchDetailed(query, limit, relevantDates.size > 0 ? relevantDates : undefined);
+    results.push(...dailyResults);
+
+    // 去重并按层级加权合并分数：高层结果提供上下文，低层结果提供细节
+    const seen = new Map<string, MemorySearchResult>();
+    for (const r of results) {
+      const key = r.entry.id!;
+      const existing = seen.get(key);
+      if (!existing || r.score > existing.score) {
+        seen.set(key, r);
+      }
+    }
+
+    // 排序：先去重，再按综合分数排序，限制返回数量
+    const finalResults = Array.from(seen.values());
+    finalResults.sort((a, b) => {
+      // 同分情况下，优先更详细的层级 (session > daily > weekly > monthly)
+      const layerOrder = { session: 4, daily: 3, weekly: 2, monthly: 1 };
+      if (Math.abs(b.score - a.score) < 0.01) {
+        return layerOrder[a.layer] - layerOrder[b.layer];
+      }
+      return b.score - a.score;
+    });
+
+    return finalResults.slice(0, limit);
   }
 
-  /** 搜索特定层级 */
-  private searchByLayer(layer: 'monthly' | 'weekly', query: string, topK: number): MemorySearchResult[] {
-    const layerMemories = this.memories.filter(m => m.type === layer);
+  /** 搜索特定层级（支持按日期范围过滤） */
+  private searchByLayer(layer: 'monthly' | 'weekly', query: string, topK: number, dateFilter?: Set<string>): MemorySearchResult[] {
+    let layerMemories = this.memories.filter(m => m.type === layer);
+    
+    // 如果提供了日期过滤，只保留相关时间段的记录
+    if (dateFilter && dateFilter.size > 0) {
+      layerMemories = layerMemories.filter(m => {
+        if (m.metadata?.period) {
+          // 检查周/月记录的 period 字段是否在过滤范围内
+          const periodStr = m.metadata.period as string;
+          for (const date of dateFilter) {
+            if (periodStr.includes(date.substring(0, 7))) { // 匹配年月 (YYYY-MM)
+              return true;
+            }
+          }
+          return false;
+        }
+        // 没有 period 字段，检查时间戳是否在范围内
+        const ym = this.getYearMonth(m.timestamp);
+        for (const date of dateFilter) {
+          if (date.startsWith(ym)) return true;
+        }
+        return false;
+      });
+    }
+    
     return layerMemories
       .map(m => ({ entry: m, score: keywordScore(query, m.content), source: layer, layer }))
       .filter(r => r.score > 0)
@@ -182,9 +236,18 @@ export class MemoryHub {
       .slice(0, topK);
   }
 
-  /** 搜索日/会话层（支持语义搜索） */
-  private async searchDetailed(query: string, limit: number): Promise<MemorySearchResult[]> {
-    const detailedMemories = this.memories.filter(m => m.type === 'session' || m.type === 'daily');
+  /** 搜索日/会话层（支持语义搜索和日期过滤） */
+  private async searchDetailed(query: string, limit: number, dateFilter?: Set<string>): Promise<MemorySearchResult[]> {
+    let detailedMemories = this.memories.filter(m => m.type === 'session' || m.type === 'daily');
+    
+    // 日期过滤：只保留相关日期的记录，大幅减少搜索范围
+    if (dateFilter && dateFilter.size > 0) {
+      detailedMemories = detailedMemories.filter(m => {
+        const entryDate = m.timestamp.split('T')[0]; // YYYY-MM-DD
+        return dateFilter.has(entryDate);
+      });
+    }
+    
     if (detailedMemories.length === 0) return [];
 
     const mode = this.embeddingConfig.mode;
@@ -418,6 +481,11 @@ export class MemoryHub {
 
   private generateId(): string {
     return `mem_${this.ctx.agentId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  }
+
+  /** 提取 YYYY-MM 格式的时间字符串 */
+  private getYearMonth(timestamp: string): string {
+    return timestamp.substring(0, 7);
   }
 
   private async persist(entry: MemoryEntry): Promise<void> {
