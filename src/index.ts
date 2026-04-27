@@ -1142,6 +1142,46 @@ const plugin = {
             logger.debug(`hook: recent summary skipped: ${err.message}`);
           }
 
+          // --- 4b. 元规则注入（自进化闭环：rules → 上下文增强）---
+          try {
+            const userContent = message?.content || message?.text || '';
+            if (userContent && userContent.trim().length >= 4) {
+              const dataDirPath = path.join(workspaceDir, 'data', agentId);
+              const kgDbPath = path.join(dataDirPath, 'knowledge.db');
+              if (fs.existsSync(kgDbPath)) {
+                // 用 createRequire 兼容 ESM
+                const sqlite3 = require('sqlite3');
+                const db = new sqlite3.Database(kgDbPath, sqlite3.OPEN_READONLY);
+                const rules: any[] = await new Promise((resolve, reject) => {
+                  db.all(
+                    `SELECT id, type, title, condition, action, confidence FROM rules WHERE confidence >= 0.6 ORDER BY confidence DESC LIMIT 5`,
+                    (err: Error | null, rows: any[]) => err ? reject(err) : resolve(rows || [])
+                  );
+                });
+                db.close();
+
+                if (rules.length > 0) {
+                  const lowerContent = userContent.toLowerCase();
+                  const matchedRules = rules.filter((r: any) => {
+                    if (!r.condition) return true;
+                    const condLower = r.condition.toLowerCase();
+                    const condKeywords = condLower.split(/[^\w\u4e00-\u9fff]+/).filter((k: string) => k.length >= 2);
+                    return condKeywords.some((kw: string) => lowerContent.includes(kw));
+                  });
+
+                  if (matchedRules.length > 0) {
+                    const ruleLines = matchedRules.map((r: any) =>
+                      `• [${r.title}] ${r.action}`
+                    ).join('\n');
+                    injectionParts.push(`\n=== 适用规则（自进化） ===\n${ruleLines}\n=== 结束 ===\n`);
+                  }
+                }
+              }
+            }
+          } catch (err: any) {
+            logger.debug(`hook: rule injection skipped: ${err.message}`);
+          }
+
           // --- 5. 语义检索增强（共享超时保护 + 独立降级）---
           try {
             const userContent = message?.content || message?.text || '';

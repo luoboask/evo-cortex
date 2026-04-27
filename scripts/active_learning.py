@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 # ═══════════════════════════════════════════════════
-# 🧠 Evo-Cortex 主动学习（跨平台 Python 版）
+# 🧠 Evo-Cortex 主动学习（memory.db 版）
 # ═══════════════════════════════════════════════════
 """
 功能：词频分析 + 用户偏好提取 + 待办事项识别
-用法：python3 active_learning_enhanced.py <agent-id>
+用法：python3 active_learning.py <agent-id>
+
+变更日志:
+    2026-04-27: 数据源 memory/*.md → memory.db
 """
+
 import sys
-import os
 import re
 import json
 import sqlite3
@@ -17,52 +20,82 @@ from collections import Counter
 
 def main():
     agent_id = sys.argv[1] if len(sys.argv) > 1 else "cortex-test-agent"
-    home = Path.home()
-    workspace = home / f".openclaw/workspace-{agent_id}"
-    memory_dir = workspace / "memory" / agent_id
-    data_dir = workspace / "data" / agent_id
-    db_path = data_dir / "cortex.db"
+    workspace = Path.home() / '.openclaw' / f'workspace-{agent_id}'
+    data_dir = workspace / 'data' / agent_id
+    memory_db = data_dir / 'memory.db'
+    knowledge_db = data_dir / 'knowledge.db'
 
     print(f"🧠 主动学习分析 - Agent: {agent_id}")
     print("=" * 50)
 
+    if not memory_db.exists():
+        print(f"❌ memory.db 不存在: {memory_db}")
+        return
+
+    conn = sqlite3.connect(memory_db)
+    conn.row_factory = sqlite3.Row
+
+    # 读取近 7 天数据
+    week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+
+    ltm_rows = conn.execute('''
+        SELECT title, content, type FROM long_term_memory WHERE created_at >= ?
+    ''', (week_ago,)).fetchall()
+
+    wm_rows = conn.execute('''
+        SELECT title, content, type FROM working_memory WHERE created_at >= ? LIMIT 100
+    ''', (week_ago,)).fetchall()
+
+    conn.close()
+
+    all_entries = list(ltm_rows) + list(wm_rows)
+    print(f"📝 从 memory.db 读取 {len(all_entries)} 条记录")
+
+    if not all_entries:
+        print("⚠️  无近期数据")
+        return
+
     # 1. 词频分析
     print("\n📊 词频分析...")
-    all_text = ""
-    files_analyzed = 0
-    if memory_dir.exists():
-        for f in memory_dir.glob("????-??-??.md"):
-            all_text += f.read_text(encoding="utf-8", errors="ignore")
-            files_analyzed += 1
+    all_text = ' '.join(f"{r['title'] or ''} {r['content'] or ''}" for r in all_entries)
 
-    print(f"   分析了 {files_analyzed} 个记忆文件")
-
-    # 英文关键词
-    en_words = re.findall(r'\b[A-Z][a-z]{3,}\b', all_text)
-    top_en = Counter(en_words).most_common(20)
-
-    # 停用词
+    # 英文技术词
+    en_words = re.findall(r'\b[A-Z][a-zA-Z]{3,}\b', all_text)
     stop_words = {'The', 'This', 'That', 'These', 'Those', 'What', 'When', 'Where',
                   'Which', 'Who', 'Why', 'How', 'Have', 'Has', 'Had', 'Will', 'Would',
                   'Could', 'Should', 'Can', 'May', 'Must', 'Shall', 'Need', 'From',
                   'With', 'About', 'After', 'Before', 'Into', 'Upon', 'Over', 'Under',
                   'Between', 'Through', 'During', 'Without', 'Within', 'Along', 'Across',
-                  'Please', 'Thank', 'Hello', 'Good', 'Just', 'Very', 'More', 'Most'}
+                  'Please', 'Thank', 'Hello', 'Good', 'Just', 'Very', 'More', 'Most',
+                  'Also', 'Some', 'Then', 'Than', 'They', 'Them', 'Their', 'There',
+                  'Other', 'Another', 'Each', 'Every', 'Any', 'All', 'Both', 'Few',
+                  'Many', 'Much', 'Such', 'Only', 'Own', 'Same', 'Well', 'Back',
+                  'Even', 'Still', 'Already', 'Always', 'Never', 'Often', 'Sometimes'}
+    filtered = [(w, c) for w, c in Counter(en_words).most_common(30) if w not in stop_words]
 
-    filtered = [(w, c) for w, c in top_en if w not in stop_words]
     if filtered:
-        print("   高频词:")
+        print("   高频技术词:")
         for word, count in filtered[:15]:
             print(f"     {word}: {count}")
     else:
         print("   无显著高频词")
 
+    # 中文技术词
+    cn_words = re.findall(r'[\u4e00-\u9fff]{2,6}', all_text)
+    cn_stopwords = {'的是', '一个', '这个', '那个', '什么', '怎么', '如何', '可以', '所以', '因为', '如果', '但是', '而且', '现在', '已经', '没有', '我们', '你们', '他们', '自己', '这些', '那些', '可能', '也许', '大概', '应该', '需要', '能够', '就是', '还有', '还是', '或者', '并且', '虽然', '尽管', '因此', '然后', '接着', '继续', '开始', '结束', '完成', '进行', '正在', '曾经', '过去', '将来', '未来', '当前', '目前', '最近', '之前', '之后'}
+    cn_filtered = [(w, c) for w, c in Counter(cn_words).most_common(30) if w not in cn_stopwords and len(w) >= 2]
+
+    if cn_filtered:
+        print("   高频中文词:")
+        for word, count in cn_filtered[:10]:
+            print(f"     {word}: {count}")
+
     # 2. 偏好提取
     print("\n🎯 偏好提取...")
     pref_patterns = [
-        (r'(?:喜欢|偏好|倾向于|prefer)\s*[：:]\s*(.+)', 'preference'),
+        (r'(?:喜欢|偏好|倾向于|倾向|prefer)\s*[：:]\s*(.+)', 'preference'),
         (r'(?:不喜欢|讨厌|不要|avoid)\s*[：:]\s*(.+)', 'dislike'),
-        (r'(?:用|使用|use)\s*([\w]+)\s*(?:开发|编写|写|coding)', 'tech_stack'),
+        (r'(?:用|使用|use)\s*([\w]+)\s*(?:开发|编写|写|做|实现)', 'tech_stack'),
     ]
 
     prefs = []
@@ -78,25 +111,8 @@ def main():
     else:
         print("   未发现新偏好")
 
-    # 3. 保存偏好到数据库
-    if db_path.exists() and prefs:
-        conn = sqlite3.connect(str(db_path))
-        cur = conn.cursor()
-        cur.execute('''CREATE TABLE IF NOT EXISTS preferences
-            (id INTEGER PRIMARY KEY AUTOINCREMENT,
-             key TEXT, value TEXT, category TEXT,
-             confidence REAL, extracted_at TEXT, confirmed INTEGER DEFAULT 0)''')
-        for p in prefs:
-            cur.execute(
-                "INSERT INTO preferences (key, value, category, confidence, extracted_at) VALUES (?, ?, ?, ?, ?)",
-                (p['value'][:50], p['value'], p['category'], 0.7, datetime.now().isoformat())
-            )
-        conn.commit()
-        conn.close()
-        print(f"   ✅ 已保存 {len(prefs)} 条偏好到数据库")
-
-    # 4. 待办识别
-    print("\n📋 待办事项识别...")
+    # 3. 待办识别
+    print("\n📋 待办事项...")
     todo_patterns = [
         r'TODO[：: ]*(.+)',
         r'(?:需要|应该|记得|别忘了|don.t forget)\s*(.+)',
@@ -112,7 +128,7 @@ def main():
     else:
         print("   无新待办")
 
-    print("\n✅ 主动学习分析完成")
+    print(f"\n✅ 主动学习分析完成 — {len(all_entries)} 条记录 / {len(filtered)} 高频词 / {len(prefs)} 偏好 / {len(todos)} 待办")
 
 if __name__ == "__main__":
     main()
