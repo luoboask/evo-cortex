@@ -262,11 +262,8 @@ export async function scanNewSessions(
       .map(m => `[${m.role}]: ${m.content.substring(0, 500)}`)
       .join('\n\n');
 
-    if (wmContent.length > 0) {
-      insertWorkingMemory(db, sessionId, wmContent, messages.length);
-      result.working_memory_written++;
-    }
-
+    // 不再写入 working_memory — hook 已通过 MemorySystem.record() 实时写入 memory.db
+    // scanner 仅保留 session_messages 存档 + preferences 提取
     result.messages_written += insertSessionMessages(db, sessionId, messages);
 
     const prefs = extractPreferences(messages);

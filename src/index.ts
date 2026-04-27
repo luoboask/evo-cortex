@@ -3,13 +3,11 @@ import { Type } from "@sinclair/typebox";
 import * as fs from 'fs';
 import * as path from 'path';
 import { MemoryHub } from "./memory/memory_hub";
+import { MemorySystem } from "./memory/memory_system";
 import { KnowledgeGraph } from "./knowledge/knowledge_graph";
+import { KnowledgeSystem } from "./knowledge/knowledge_system";
 import { EvolutionScheduler } from "./evolution/scheduler";
-import {
-  messageReceivedHook,
-  messageSentHook,
-  beforeToolCallHook
-} from "./hooks";
+import { beforeToolCallHook } from "./hooks";
 import { MemoryIndexer } from "./memory/memory_indexer";
 import { IndexBuilder } from "./memory/index_builder";
 import { SessionScanner } from "./memory/session_scanner";
@@ -22,15 +20,6 @@ import type { RetentionPolicy } from "./utils/config-validator";
 import { getCache } from "./utils/cache";
 import { runHealthCheck, formatHealthReport } from "./tools/health-check";
 import { checkAndPrompt, markAsConfigured, isCronConfigured } from "./utils/cron-auto-setup";
-
-// ========== 模块级单例：共享 IndexBuilder ==========
-// 避免每次工具调用都创建/关闭数据库连接
-declare global {
-  // eslint-disable-next-line no-var
-  var __evoCortexSharedIndexBuilder: any;
-  // eslint-disable-next-line no-var
-  var __evoCortexSharedMemoryIndexer: any;
-}
 
 // Agent-isolated MemoryIndexer singletons: one per agent
 const sharedMemoryIndexers = new Map<string, MemoryIndexer>();
@@ -614,6 +603,211 @@ const plugin = {
       };
     });
 
+    // 12. 长期记忆搜索工具（基于 memory.db）
+    api.registerTool((ctx) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'search_long_term_memory',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "search_long_term_memory",
+        description: "搜索长期记忆（memory.db） - 支持重要性评分和动态排序",
+        parameters: Type.Object({
+          query: Type.String({ description: "搜索查询" }),
+          types: Type.Optional(Type.String({ description: "记忆类型过滤（逗号分隔）" })),
+          min_importance: Type.Optional(Type.Number({ description: "最低重要性分数", default: 0 })),
+          limit: Type.Optional(Type.Number({ description: "返回结果数量", default: 10 }))
+        }),
+        async execute(_id: string, params: any) {
+          try {
+            const ms = getOrCreateMS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            if (!ms) {
+              return { content: [{ type: "text" as const, text: "MemorySystem not available" }] };
+            }
+            const queryTypes = params.types ? params.types.split(',').map((t: string) => t.trim()) : undefined;
+            const results = await ms.search({
+              text: params.query,
+              types: queryTypes,
+              minImportance: params.min_importance || 0,
+              limit: params.limit || 10
+            });
+            toolLogger.info(`Found ${results.length} long-term memories`);
+            return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
+          } catch (error: any) {
+            toolLogger.error('Long-term memory search failed', error);
+            return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
+    // 13. 实体列表工具（基于 knowledge.db）
+    api.registerTool((ctx) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'list_entities',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "list_entities",
+        description: "列出知识图谱实体 - 支持搜索和类型过滤",
+        parameters: Type.Object({
+          query: Type.Optional(Type.String({ description: "搜索查询" })),
+          type: Type.Optional(Type.String({ description: "实体类型过滤" }))
+        }),
+        async execute(_id: string, params: any) {
+          try {
+            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            if (!ks) {
+              return { content: [{ type: "text" as const, text: "KnowledgeSystem not available" }] };
+            }
+            let results;
+            if (params.query) {
+              results = await ks.searchEntities(params.query);
+            } else {
+              // 列出所有实体（通过空搜索）
+              results = await ks.searchEntities('');
+            }
+            if (params.type) {
+              results = results.filter((e: any) => e.type === params.type);
+            }
+            toolLogger.info(`Found ${results.length} entities`);
+            return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
+          } catch (error: any) {
+            toolLogger.error('List entities failed', error);
+            return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
+    // 14. 规则列表工具（基于 knowledge.db）
+    api.registerTool((ctx) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'list_rules',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "list_rules",
+        description: "列出知识规则 - 支持搜索",
+        parameters: Type.Object({
+          query: Type.Optional(Type.String({ description: "搜索查询" }))
+        }),
+        async execute(_id: string, params: any) {
+          try {
+            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            if (!ks) {
+              return { content: [{ type: "text" as const, text: "KnowledgeSystem not available" }] };
+            }
+            const results = params.query
+              ? await ks.searchRules(params.query)
+              : await ks.searchRules('');
+            toolLogger.info(`Found ${results.length} rules`);
+            return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
+          } catch (error: any) {
+            toolLogger.error('List rules failed', error);
+            return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
+    // 15. 记忆晋升工具 — 将工作记忆晋升到长期记忆，并触发知识提取
+    api.registerTool((ctx) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'consolidate_memory',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "consolidate_memory",
+        description: "将过期且重要性 >= 7 的工作记忆晋升到长期记忆，并触发知识图谱更新",
+        parameters: Type.Object({
+          run_knowledge_update: Type.Optional(Type.Boolean({ description: "是否触发知识系统更新", default: true }))
+        }),
+        async execute(_id: string, params: any) {
+          try {
+            const ms = getOrCreateMS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            if (!ms) {
+              return { content: [{ type: "text" as const, text: "MemorySystem not available" }] };
+            }
+
+            const runKg = params.run_knowledge_update !== false;
+            let kgUpdated = 0;
+
+            const result = await ms.consolidate({
+              onPromoted: async (ltmId: string, row: any) => {
+                if (!runKg || !ks) return;
+                const memoryDb = (ms as any).db;
+                if (memoryDb) {
+                  await ks.updateFromLTM(ltmId, memoryDb);
+                  kgUpdated++;
+                }
+              }
+            });
+            toolLogger.info(`Consolidated ${result.promoted} entries to long-term memory`);
+
+            const stats = await ms.getStats();
+            return { content: [{ type: "text" as const, text: JSON.stringify({
+              promoted: result.promoted,
+              knowledge_updated: kgUpdated,
+              stats: { workingMemory: stats.workingMemory, longTermMemory: stats.longTermMemory }
+            }, null, 2) }] };
+          } catch (error: any) {
+            toolLogger.error('Consolidate failed', error);
+            return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
+    // 16. 记忆统计工具
+    api.registerTool((ctx) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'memory_stats',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "memory_stats",
+        description: "查看记忆系统统计信息（工作记忆、长期记忆、实体、关系、规则）",
+        parameters: Type.Object({}),
+        async execute(_id: string) {
+          try {
+            const ms = getOrCreateMS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const result: any = {};
+            if (ms) {
+              result.memory = await ms.getStats();
+            }
+            if (ks) {
+              result.knowledge = await ks.getStats();
+            }
+            if (Object.keys(result).length === 0) {
+              return { content: [{ type: "text" as const, text: "No memory systems available" }] };
+            }
+            return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
+          } catch (error: any) {
+            toolLogger.error('Memory stats failed', error);
+            return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
     // ========== 实例缓存（避免每次 hook 都重建）==========
     const hubCache = new Map<string, { memoryHub: MemoryHub; knowledgeGraph: KnowledgeGraph }>();
 
@@ -627,6 +821,49 @@ const plugin = {
         hubCache.set(agentId, cached);
       }
       return cached;
+    }
+
+    // ========== 新系统实例缓存 ==========
+    const msCache = new Map<string, MemorySystem>();
+    const ksCache = new Map<string, KnowledgeSystem>();
+
+    function getOrCreateMS(agentId: string, workspaceDir: string): MemorySystem | null {
+      if (!msCache.has(agentId)) {
+        try {
+          const dataDir = path.join(workspaceDir, 'data');
+          const ms = new MemorySystem(agentId, dataDir);
+          ms.init().catch(e => console.warn(`[evo-cortex] MemorySystem init failed for ${agentId}: ${e.message}`));
+
+          // 注入 IndexBuilder（启用 FTS+向量融合搜索）
+          try {
+            const indexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
+            const builder = indexer.getIndexBuilder();
+            const hookLogger = getLogger({ component: 'memory_system_search' });
+            ms.setIndexBuilder(builder, hookLogger);
+          } catch {
+            // IndexBuilder 不可用时降级为 LIKE 搜索，不影响正常使用
+          }
+
+          msCache.set(agentId, ms);
+        } catch {
+          return null;
+        }
+      }
+      return msCache.get(agentId)!;
+    }
+
+    function getOrCreateKS(agentId: string, workspaceDir: string): KnowledgeSystem | null {
+      if (!ksCache.has(agentId)) {
+        try {
+          const dataDir = path.join(workspaceDir, 'data');
+          const ks = new KnowledgeSystem(agentId, dataDir);
+          ks.init().catch(e => console.warn(`[evo-cortex] KnowledgeSystem init failed for ${agentId}: ${e.message}`));
+          ksCache.set(agentId, ks);
+        } catch {
+          return null;
+        }
+      }
+      return ksCache.get(agentId)!;
     }
 
 //    // 1. message_received hook - 保存对话到记忆
@@ -729,6 +966,20 @@ const plugin = {
       } catch { return null; }
     }
 
+    // 判断是否是真实对话（过滤 cron、系统事件、工具调用等噪声）
+    function isRealConversation(text: string): boolean {
+      if (!text || text.length < 5) return false;
+      if (text.includes('[cron:') || text.includes('[SCRIPT MODE]')) return false;
+      if (text.includes('[toolCall]') || text.includes('[toolResult]')) return false;
+      if (text.includes('Sender (untrusted metadata)')) return false;
+      if (text.includes('openclaw-tui') || text.includes('openclaw-control-ui')) return false;
+      const trimmed = text.trim();
+      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+          (trimmed.startsWith('[') && trimmed.endsWith(']'))) return false;
+      if (text.length > 2000) return false;
+      return true;
+    }
+
     // 轻量级 shouldEnhance 判断（内联版本，避免导入 hooks 模块）
     function shouldEnhanceMessage(content: string): boolean {
       if (!content || content.trim().length < 4) return false;
@@ -751,59 +1002,109 @@ const plugin = {
           const parts = sessionKey.split(':');
           const agentId = parts.length >= 2 ? parts[1] : 'main';
           const workspaceDir = path.join(process.env.HOME || '', '.openclaw', `workspace-${agentId}`);
-
-          const { memoryHub } = getOrCreateHub(agentId, { agentId, workspaceDir } as any);
           const injectionParts: string[] = [];
 
-          // 用户偏好（缓存，~1ms）
-          if (fs.existsSync(workspaceDir)) {
-            const prefs = await loadPrefs(workspaceDir, agentId);
-            if (prefs) injectionParts.push(prefs);
+          // --- 1. 用户偏好注入（缓存读取，独立降级）---
+          try {
+            if (fs.existsSync(workspaceDir)) {
+              const prefs = await loadPrefs(workspaceDir, agentId);
+              if (prefs) injectionParts.push(prefs);
+            }
+          } catch (err: any) {
+            logger.debug(`hook: pref injection skipped: ${err.message}`);
           }
 
-          // 按需 session 扫描（异步，不阻塞回复）
-          if (agentId && agentId !== 'main') {
-            const openclawRoot = path.join(process.env.HOME || '', '.openclaw');
-            const sessionsPath = path.join(openclawRoot, 'agents', agentId, 'sessions');
-            const dataDir = path.join(workspaceDir, 'data', agentId);
-            const prefFile = path.join(workspaceDir, 'memory', agentId, 'USER_PREFERENCES.md');
-            const hookLogger = getLogger({ component: 'session_scanner' });
+          // --- 2. 写入工作记忆（异步 fire-and-forget，不阻塞）---
+          try {
+            const userContent = message?.content || message?.text || '';
+            if (userContent && isRealConversation(userContent)) {
+              const ms = getOrCreateMS(agentId, workspaceDir);
+              if (ms) {
+                ms.record({
+                  type: 'conversation',
+                  content: `User: ${userContent}`,
+                  source: 'hook',
+                  sourceRef: agentId,
+                }).catch(() => {}); // 异步写入，不阻塞
+              }
+            }
+          } catch (err: any) {
+            logger.debug(`hook: memory record skipped: ${err.message}`);
+          }
 
-            // fire-and-forget：扫描完成后自动触发增量索引更新
-            scanNewSessions(agentId, dataDir, sessionsPath, prefFile, hookLogger)
-              .then(async r => {
-                if (r.new_sessions > 0) {
-                  hookLogger.info(`scan: ${r.new_sessions} new, ${r.messages_written} msgs, ${r.preferences_extracted} prefs in ${r.duration_ms}ms`);
-                  // 自动增量更新索引（不阻塞对话）
-                  try {
-                    const memoryIndexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
-                    const builder = memoryIndexer.getIndexBuilder();
-                    const memoryDir = getMemoryStorageDir({ agentId, workspaceDir } as any);
-                    await builder.update([memoryDir]);
-                    hookLogger.info('incremental index update completed');
-                  } catch (err: any) {
-                    hookLogger.warn(`incremental index update failed: ${err.message}`);
+          // --- 3. 按需 session 扫描（异步，不阻塞回复）---
+          try {
+            if (agentId && agentId !== 'main') {
+              const openclawRoot = path.join(process.env.HOME || '', '.openclaw');
+              const sessionsPath = path.join(openclawRoot, 'agents', agentId, 'sessions');
+              const dataDir = path.join(workspaceDir, 'data', agentId);
+              const prefFile = path.join(workspaceDir, 'memory', agentId, 'USER_PREFERENCES.md');
+              const hookLogger = getLogger({ component: 'session_scanner' });
+
+              scanNewSessions(agentId, dataDir, sessionsPath, prefFile, hookLogger)
+                .then(async r => {
+                  if (r.new_sessions > 0) {
+                    hookLogger.info(`scan: ${r.new_sessions} new, ${r.messages_written} msgs, ${r.preferences_extracted} prefs in ${r.duration_ms}ms`);
+                    // 自动增量更新索引（不阻塞对话）
+                    try {
+                      const memoryIndexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
+                      const builder = memoryIndexer.getIndexBuilder();
+                      const memoryDir = getMemoryStorageDir({ agentId, workspaceDir } as any);
+                      await builder.update([memoryDir]);
+                      hookLogger.info('incremental index update completed');
+                    } catch (err: any) {
+                      hookLogger.warn(`incremental index update failed: ${err.message}`);
+                    }
                   }
-                }
-              })
-              .catch(err => hookLogger.error('scan failed', err));
+                })
+                .catch(err => hookLogger.error('scan failed', err));
+            }
+          } catch (err: any) {
+            logger.debug(`hook: session scan skipped: ${err.message}`);
           }
 
-          // 最近记忆标题摘要（MemoryHub 读取，~2ms）
-          const summary = await memoryHub.getRecentDailySummary(2);
-          if (summary) injectionParts.push(`\n=== 最近记忆 ===\n${summary}\n=== 结束 ===\n`);
+          // --- 4. 最近记忆摘要（MemoryHub 读取，~2ms，独立降级）---
+          try {
+            const { memoryHub } = getOrCreateHub(agentId, { agentId, workspaceDir } as any);
+            const summary = await memoryHub.getRecentDailySummary(2);
+            if (summary) injectionParts.push(`\n=== 最近记忆 ===\n${summary}\n=== 结束 ===\n`);
+          } catch (err: any) {
+            logger.debug(`hook: recent summary skipped: ${err.message}`);
+          }
 
-          // 语义检索增强 — 根据用户消息内容决定是否搜索记忆（带超时保护）
-          const userContent = message?.content || message?.text || '';
-          if (shouldEnhanceMessage(userContent)) {
-            try {
-              const searchTimeout = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('search timeout')), 2000)
-              );
-              const memories = await Promise.race([
-                memoryHub.search(userContent, 3),
-                searchTimeout
-              ]) as any[];
+          // --- 5. 语义检索增强（共享超时保护 + 独立降级）---
+          try {
+            const userContent = message?.content || message?.text || '';
+            if (shouldEnhanceMessage(userContent)) {
+              const searchDeadline = Date.now() + 2000; // 总预算 2s，记忆+知识共享
+
+              // 辅助：根据剩余时间创建 Promise.race 超时
+              const remainingTimeout = () => {
+                const remaining = Math.max(0, searchDeadline - Date.now());
+                return new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error('search timeout')), remaining)
+                );
+              };
+
+              let memories: any[];
+              try {
+                const ms = getOrCreateMS(agentId, workspaceDir);
+                if (ms) {
+                  memories = await Promise.race([
+                    ms.search({ text: userContent, limit: 3 }),
+                    remainingTimeout()
+                  ]) as any[];
+                } else {
+                  throw new Error('MemorySystem unavailable');
+                }
+              } catch {
+                // MemorySystem 不可用，回退到 MemoryHub
+                const { memoryHub } = getOrCreateHub(agentId, { agentId, workspaceDir } as any);
+                memories = await Promise.race([
+                  memoryHub.search(userContent, 3),
+                  remainingTimeout()
+                ]) as any[];
+              }
 
               if (memories && memories.length > 0) {
                 const contextLines = memories.slice(0, 3).map((m: any, i: number) => {
@@ -813,17 +1114,41 @@ const plugin = {
                 }).join('\n');
                 injectionParts.push(`\n=== 相关记忆 ===\n${contextLines}\n=== 结束 ===\n`);
               }
-            } catch (err: any) {
-              // 搜索超时或失败不影响正常对话，静默降级
-              if (err.message !== 'search timeout') {
-                getLogger({ component: 'message_received' }).debug(`semantic search skipped: ${err.message}`);
+
+              // 知识图谱搜索（独立降级，使用剩余时间预算）
+              try {
+                const ks = getOrCreateKS(agentId, workspaceDir);
+                if (ks) {
+                  const knowledge = await Promise.race([
+                    ks.searchEntities(userContent),
+                    remainingTimeout()
+                  ]) as any[];
+                  if (knowledge && knowledge.length > 0) {
+                    const kgLines = knowledge.slice(0, 3).map((k: any, i: number) => {
+                      const name = k.entity?.name || k.name || '未知';
+                      const type = k.entity?.type || k.type || 'unknown';
+                      const desc = (k.entity?.description || k.description || '').substring(0, 150);
+                      return `${name} (${type}): ${desc}`;
+                    }).join('\n');
+                    injectionParts.push(`\n=== 相关知识 ===\n${kgLines}\n=== 结束 ===\n`);
+                  }
+                }
+              } catch (err: any) {
+                // 知识搜索失败不影响记忆检索结果，静默降级
+                getLogger({ component: 'message_received' }).debug(`knowledge search skipped: ${err.message}`);
               }
+            }
+          } catch (err: any) {
+            // 搜索超时或失败不影响正常对话，静默降级
+            if (err.message !== 'search timeout') {
+              getLogger({ component: 'message_received' }).debug(`semantic search skipped: ${err.message}`);
             }
           }
 
           if (injectionParts.length === 0) return {};
           return { system_prompt_addition: injectionParts.join('\n') };
         } catch (error: any) {
+          // 终极保护：即使上面所有 try/catch 都没拦住，外层也要返回空对象而不是抛异常
           logger.error('message_received hook failed', error);
           return {};
         }
@@ -892,6 +1217,15 @@ export * from './utils/logger';
 export * from './utils/cache';
 export * from './utils/config-validator';
 export * from './utils/plugin-context';
-export * from './memory/memory_hub';
-export * from './knowledge/knowledge_graph';
+// memory_hub 保留兼容层
+export { MemoryHub, MemoryConfig, MemorySearchResult, CleanupReport, CompressionReport } from './memory/memory_hub';
+// memory_system 新系统（重命名避免冲突）
+export { MemorySystem } from './memory/memory_system';
+export type { MemoryEntry as MemorySystemEntry, SearchResult as MemorySearchResultV2, SearchQuery as MemorySearchQuery } from './memory/memory_system';
+// knowledge_graph 保留兼容层
+export { KnowledgeGraph, KnowledgeConfig } from './knowledge/knowledge_graph';
+export type { KnowledgeEntity as KnowledgeEntityV1, KnowledgeRelation as KnowledgeRelationV1, KnowledgeSearchResult } from './knowledge/knowledge_graph';
+// knowledge_system 新系统
+export { KnowledgeSystem } from './knowledge/knowledge_system';
+export type { KnowledgeEntity as KnowledgeEntityV2, KnowledgeRelation as KnowledgeRelationV2, KnowledgeRule, SearchQuery as KnowledgeSearchQuery } from './knowledge/knowledge_system';
 export * from './evolution/scheduler';

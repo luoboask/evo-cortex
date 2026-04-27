@@ -75,3 +75,80 @@ declare module "openclaw/plugin-sdk/plugin-entry" {
   
   export function definePluginEntry(entry: PluginEntry): PluginEntry;
 }
+
+// ========== evo-cortex 扩展类型 ==========
+
+/** 记忆条目类型 */
+export interface MemoryEntry {
+  type: 'conversation' | 'decision' | 'bugfix' | 'insight' | 'preference' | 'error' | 'observation';
+  title?: string;
+  content: string;
+  source: 'hook' | 'scan' | 'manual' | 'cron';
+  sourceRef?: string;
+  tags?: string[];
+}
+
+/** 搜索结果 */
+export interface SearchResult {
+  id: string;
+  type: string;
+  targetType: 'event' | 'entity' | 'relation' | 'rule';
+  title?: string;
+  content?: string;
+  importance: number;
+  recall_count?: number;
+  used_count?: number;
+  created_at: string;
+  dynamicScore?: number;
+}
+
+/** 搜索查询 */
+export interface SearchQuery {
+  text: string;
+  types?: string[];
+  minImportance?: number;
+  limit?: number;
+}
+
+/** 知识实体 */
+export interface KnowledgeEntity {
+  id: string;
+  name: string;
+  type: string;
+  description?: string;
+  aliases?: string[];
+  importance: number;
+  mentionCount: number;
+  lastMentioned?: string;
+  firstSeenFrom?: string;
+  createdAt: string;
+}
+
+/** 知识关系 */
+export interface KnowledgeRelation {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  type: string;
+  strength: number;
+  evidence?: string[];
+  usedCount: number;
+  lastUsed?: string;
+  createdAt: string;
+}
+
+/** 知识规则 */
+export interface KnowledgeRule {
+  id: string;
+  type: string;
+  title: string;
+  condition?: string;
+  action: string;
+  confidence: number;
+  supportCount: number;
+  violationCount: number;
+  usedCount: number;
+  lastUsed?: string;
+  lastValidated?: string;
+  createdAt: string;
+}
