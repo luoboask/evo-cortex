@@ -43,6 +43,12 @@ ENTITY_NOISE = {
     'username', 'metadata', 'GMT', 'Mon', 'Tue', 'Wed',
     'Thu', 'Fri', 'Sat', 'Sun', 'Assistant', 'Message',
     'Agent', 'Session', 'Plugin',
+    # 通用高频词（LTM 样本少时容易误提取）
+    'User', 'AI', '运行', '行数', '总结', '问题', '说明',
+    '上下文增', 'Gateway', '回复', '文件', '命令', '路径',
+    'Python', '修复', '测试', '配置', '数据', '记录',
+    '脚本', '执行', '数据库', '查询', '结果', '格式',
+    '代码', '函数', '方法', '变量', '参数', '返回',
 }
 
 ENTITY_NOISE_CN = {

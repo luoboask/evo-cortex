@@ -76,12 +76,20 @@ def main():
                   'USER', 'BOOTSTRAP', 'IDENTITY', 'SOUL', 'MEMORY', 'TOOLS', 'AGENTS',
                   'Name', 'Notes', 'Related', 'Update', 'Make', 'Agent',
                   'Your', 'Workspace', 'Context', 'First', 'Session', 'Heartbeat',
-                  'Memory', 'System', 'Status', 'Red', 'Lines', 'External', 'Internal',
-                  'Skills', 'Voice', 'Platform', 'Make', 'Default', 'Default',
-                  'Skills', 'Keep', 'Local', 'What', 'Goes', 'Here', 'Like',
+                  'System', 'Status', 'Red', 'Lines', 'External', 'Internal',
+                  'Skills', 'Voice', 'Platform', 'Default',
+                  'Keep', 'Local', 'What', 'Goes', 'Here', 'Like',
                   'Cameras', 'Living', 'Front', 'TTS', 'Preferred', 'Speaker',
-                  'Why', 'Separate', 'Shared', 'Keeping', 'Apart', 'Means',
-                  'Infrastructure', 'Add', 'Whatever', 'Helps', 'Cheat', 'Sheet'}
+                  'Separate', 'Shared', 'Keeping', 'Apart', 'Means',
+                  'Infrastructure', 'Add', 'Whatever', 'Helps', 'Cheat', 'Sheet',
+                  # 对话元数据噪音（WM 中包含的 hook 元数据）
+                  'User', 'AI', 'Gateway', 'Sender', 'metadata', 'untrusted',
+                  'label', 'username', 'json', 'GMT', 'CST', 'UTC',
+                  # 通用技术噪音
+                  'File', 'Line', 'Error', 'Debug', 'Info', 'Warning',
+                  'Check', 'Done', 'Run', 'Test', 'Phase', 'Commit',
+                  'Phase', 'Commit', 'REPLACE', 'SyntaxError',
+    }
     filtered = [(w, c) for w, c in Counter(en_words).most_common(30) if w not in stop_words]
 
     if filtered:

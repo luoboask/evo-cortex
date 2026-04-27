@@ -290,7 +290,9 @@ class RuleWriter:
         stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
         
         for rule in rules:
-            cur.execute('SELECT id, confidence FROM rules WHERE title = ?', (rule['title'],))
+            # 模糊匹配：提取 title 前缀（去掉计数字）
+            title_prefix = rule['title'].split('(')[0].strip()
+            cur.execute('SELECT id, confidence FROM rules WHERE title LIKE ?', (f'{title_prefix}%',))
             existing = cur.fetchone()
             
             if existing:
