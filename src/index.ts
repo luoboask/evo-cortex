@@ -1086,6 +1086,8 @@ const plugin = {
 
           // --- 2. 写入工作记忆（异步 fire-and-forget，不阻塞）---
           try {
+            // DEBUG: 打印完整 message 结构
+            logger.info(`[DEBUG message:received] keys=${Object.keys(message || {}).join(',')} content_type=${typeof message?.content} content_preview=${typeof message?.content === 'string' ? message.content.substring(0, 100) : JSON.stringify(message?.content).substring(0, 100)}`);
             const userContent = message?.content || message?.text || '';
             if (userContent && isRealConversation(userContent)) {
               const ms = getOrCreateMS(agentId, workspaceDir);
