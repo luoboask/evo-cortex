@@ -10,9 +10,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { PluginContext, getMemoryStorageDir } from "../utils/plugin-context";
 import { SemanticSearch, SearchableDocument } from "./semantic_search";
-import { getEmbedding, initTfIdf, trainTfIdf, getEmbeddingLevel, keywordScore } from "./embedding_provider";
+import { getEmbedding, getEmbeddingLevel, simpleKeywordMatch } from "./embedding_provider";
 import { EmbeddingCache, cosineSimilarity } from "./embedding_cache";
 import { RagEvaluator, RetrievalResult } from "../knowledge/rag_evaluator";
+import { IndexBuilder, UnifiedSearchResult } from "./index_builder";
 import type { EmbeddingConfig, RetentionPolicy } from "../utils/config-validator";
 
 // ========== 配置 ==========
@@ -71,6 +72,7 @@ export class MemoryHub {
   private embeddingAvailable: boolean = false;
   private lastEmbeddingAttempt: number = 0;
   private embeddingRetryInterval: number = 5 * 60 * 1000;
+  private indexBuilder?: IndexBuilder; // 可选的 FTS+向量索引
 
   constructor(ctx: PluginContext, config?: Partial<MemoryConfig>, embeddingConfig?: Partial<EmbeddingConfig>, retention?: Partial<RetentionPolicy>) {
     this.ctx = ctx;
@@ -80,7 +82,7 @@ export class MemoryHub {
     this.storageDir = getMemoryStorageDir(ctx);
     this.ensureDirectory(this.storageDir);
 
-    this.embeddingConfig = { enabled: true, mode: "auto", fallback: "tfidf", ...embeddingConfig };
+    this.embeddingConfig = { enabled: true, mode: "auto", fallback: "fts", ...embeddingConfig };
     this.embeddingCache = new EmbeddingCache({ maxSize: 5000, ttlMs: 24 * 60 * 60 * 1000 });
 
     const embeddingFunc = this.embeddingConfig.enabled && this.embeddingConfig.mode !== "keyword"
@@ -115,6 +117,12 @@ export class MemoryHub {
 
   // ========== 写入 ==========
 
+  /** 设置索引构建器（可选，用于启用 FTS+向量搜索） */
+  setIndexBuilder(indexBuilder: IndexBuilder): void {
+    this.indexBuilder = indexBuilder;
+    console.log('[MemoryHub] IndexBuilder attached, unified search enabled');
+  }
+
   async add(entry: Omit<MemoryEntry, "id">): Promise<MemoryEntry> {
     const mem: MemoryEntry = { ...entry, id: this.generateId() };
     this.memories.push(mem);
@@ -130,9 +138,7 @@ export class MemoryHub {
       this.memories.push(mem);
       results.push(mem);
     }
-    if (this.memories.length >= 3) {
-      trainTfIdf(this.ctx, this.memories.map(m => ({ id: m.id!, content: m.content })));
-    }
+    // TF-IDF 已移除，embedding 不可用时由 FTS 降级
     for (const m of results) {
       await this.addToSemanticSearch(m);
       await this.persist(m);
@@ -154,34 +160,63 @@ export class MemoryHub {
 
     const results: MemorySearchResult[] = [];
 
-    // 第一层：月度概述 - 定位相关时间段，获取宏观背景 (权重 0.2)
-    const monthly = this.searchByLayer('monthly', query, Math.ceil(limit * 0.2));
-    results.push(...monthly);
-
-    // 第二层：周度概述 - 在月度结果覆盖的时间范围内精查 (权重 0.3)
-    const monthlyTimestamps = new Set(monthly.map(r => this.getYearMonth(r.entry.timestamp)));
-    const weekly = this.searchByLayer('weekly', query, Math.ceil(limit * 0.3), monthlyTimestamps.size > 0 ? monthlyTimestamps : undefined);
-    results.push(...weekly);
-
-    // 第三层：日度记录 - 在周度覆盖的日期内搜索详细信息 (权重 0.5)
-    const relevantDates = new Set<string>();
-    for (const m of monthly) {
-      const date = new Date(m.entry.timestamp).toISOString().split('T')[0];
-      relevantDates.add(date);
-    }
-    for (const w of weekly) {
-      if (w.entry.metadata?.dateRange) {
-        const [start, end] = w.entry.metadata.dateRange;
-        const s = new Date(start), e = new Date(end);
-        while (s <= e) {
-          relevantDates.add(s.toISOString().split('T')[0]);
-          s.setDate(s.getDate() + 1);
+    // 优先使用 FTS+向量索引搜索（如果可用）
+    if (this.indexBuilder) {
+      try {
+        const unifiedResults = await this.indexBuilder.unifiedSearch(query, limit);
+        if (unifiedResults.length > 0) {
+          for (const r of unifiedResults) {
+            results.push({
+              entry: {
+                id: r.id,
+                content: r.content,
+                type: 'session',
+                timestamp: new Date().toISOString(),
+                metadata: r.metadata
+              },
+              score: r.score,
+              source: r.source,
+              layer: 'session'
+            });
+          }
+          console.log(`[MemoryHub] Unified search returned ${unifiedResults.length} results`);
         }
+      } catch (err: any) {
+        console.warn(`[MemoryHub] Unified search failed, falling back to layered search: ${err.message}`);
       }
     }
 
-    const dailyResults = await this.searchDetailed(query, limit, relevantDates.size > 0 ? relevantDates : undefined);
-    results.push(...dailyResults);
+    // 如果索引搜索没有结果，使用分层搜索
+    if (results.length === 0) {
+      // 第一层：月度概述 - 定位相关时间段，获取宏观背景 (权重 0.2)
+      const monthly = this.searchByLayer('monthly', query, Math.ceil(limit * 0.2));
+      results.push(...monthly);
+
+      // 第二层：周度概述 - 在月度结果覆盖的时间范围内精查 (权重 0.3)
+      const monthlyTimestamps = new Set(monthly.map(r => this.getYearMonth(r.entry.timestamp)));
+      const weekly = this.searchByLayer('weekly', query, Math.ceil(limit * 0.3), monthlyTimestamps.size > 0 ? monthlyTimestamps : undefined);
+      results.push(...weekly);
+
+      // 第三层：日度记录 - 在周度覆盖的日期内搜索详细信息 (权重 0.5)
+      const relevantDates = new Set<string>();
+      for (const m of monthly) {
+        const date = new Date(m.entry.timestamp).toISOString().split('T')[0];
+        relevantDates.add(date);
+      }
+      for (const w of weekly) {
+        if (w.entry.metadata?.dateRange) {
+          const [start, end] = w.entry.metadata.dateRange;
+          const s = new Date(start), e = new Date(end);
+          while (s <= e) {
+            relevantDates.add(s.toISOString().split('T')[0]);
+            s.setDate(s.getDate() + 1);
+          }
+        }
+      }
+
+      const dailyResults = await this.searchDetailed(query, limit, relevantDates.size > 0 ? relevantDates : undefined);
+      results.push(...dailyResults);
+    }
 
     // 去重并按层级加权合并分数：高层结果提供上下文，低层结果提供细节
     const seen = new Map<string, MemorySearchResult>();
@@ -250,7 +285,7 @@ export class MemoryHub {
     }
     
     return layerMemories
-      .map(m => ({ entry: m, score: keywordScore(query, m.content), source: layer, layer }))
+      .map(m => ({ entry: m, score: simpleKeywordMatch(query, m.content), source: layer, layer }))
       .filter(r => r.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, topK);
@@ -276,7 +311,7 @@ export class MemoryHub {
     const enabled = this.embeddingConfig.enabled;
 
     if (!enabled || mode === 'keyword') {
-      return detailedMemories.map(m => ({ entry: m, score: keywordScore(query, m.content), source: 'keyword', layer: 'session' as const }))
+      return detailedMemories.map(m => ({ entry: m, score: simpleKeywordMatch(query, m.content), source: 'keyword', layer: 'session' as const }))
         .filter(r => r.score > 0).sort((a, b) => b.score - a.score).slice(0, limit);
     }
 
@@ -298,7 +333,7 @@ export class MemoryHub {
       }
     } catch { /* fall through */ }
 
-    return detailedMemories.map(m => ({ entry: m, score: keywordScore(query, m.content), source: 'keyword', layer: 'session' as const }))
+    return detailedMemories.map(m => ({ entry: m, score: simpleKeywordMatch(query, m.content), source: 'keyword', layer: 'session' as const }))
       .filter(r => r.score > 0).sort((a, b) => b.score - a.score).slice(0, limit);
   }
 
@@ -547,10 +582,7 @@ export class MemoryHub {
       }
 
       this.memories = rawEntries;
-      initTfIdf(this.ctx);
-      if (this.memories.length >= 3) {
-        trainTfIdf(this.ctx, this.memories.map(m => ({ id: m.id!, content: m.content })));
-      }
+      // TF-IDF 已移除，embedding 不可用时由 FTS 降级
       for (const entry of this.memories) this.addToSemanticSearch(entry).catch(() => {});
     } catch (err) { console.error('[MemoryHub] Load error:', err); }
   }

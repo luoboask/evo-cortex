@@ -11,16 +11,39 @@ import {
   beforeToolCallHook
 } from "./hooks";
 import { MemoryIndexer } from "./memory/memory_indexer";
+import { IndexBuilder } from "./memory/index_builder";
 import { SessionScanner } from "./memory/session_scanner";
 import { scanNewSessions } from "./utils/session_scanner";
 import { WebCrawler } from "./knowledge/web_crawler";
-import { buildPluginContext, getMemoryStorageDir, getKnowledgeStorageDir, getDataDir } from "./utils/plugin-context";
+import { buildPluginContext, getMemoryStorageDir, getKnowledgeStorageDir, getDataDir, PluginContext } from "./utils/plugin-context";
 import { getLogger } from "./utils/logger";
 import { validateConfig, getConfigSummary } from "./utils/config-validator";
 import type { RetentionPolicy } from "./utils/config-validator";
 import { getCache } from "./utils/cache";
 import { runHealthCheck, formatHealthReport } from "./tools/health-check";
 import { checkAndPrompt, markAsConfigured, isCronConfigured } from "./utils/cron-auto-setup";
+
+// ========== 模块级单例：共享 IndexBuilder ==========
+// 避免每次工具调用都创建/关闭数据库连接
+declare global {
+  // eslint-disable-next-line no-var
+  var __evoCortexSharedIndexBuilder: any;
+  // eslint-disable-next-line no-var
+  var __evoCortexSharedMemoryIndexer: any;
+}
+
+// Agent-isolated MemoryIndexer singletons: one per agent
+const sharedMemoryIndexers = new Map<string, MemoryIndexer>();
+
+function getOrCreateSharedMemoryIndexer(ctx: PluginContext): MemoryIndexer {
+  const agentId = ctx.agentId;
+  if (!sharedMemoryIndexers.has(agentId)) {
+    const indexer = new MemoryIndexer(ctx);
+    indexer.init();
+    sharedMemoryIndexers.set(agentId, indexer);
+  }
+  return sharedMemoryIndexers.get(agentId)!;
+}
 
 // 全局标志：确保废弃警告只显示一次
 let deprecationWarningShown = false;
@@ -143,6 +166,23 @@ const plugin = {
     // 初始化全局缓存
     const searchCache = getCache('search_results', { maxEntries: 500, defaultTTL: 10 * 60 * 1000 });
 
+    // Agent-isolated IndexBuilder singletons: one per agent
+    const sharedIndexBuilders = new Map<string, IndexBuilder>();
+    // 延迟初始化：在第一次搜索时按 agentId 创建
+    const initIndexBuilder = (pluginCtx: PluginContext) => {
+      const agentId = pluginCtx.agentId;
+      if (sharedIndexBuilders.has(agentId)) return sharedIndexBuilders.get(agentId)!;
+      try {
+        const builder = new IndexBuilder(pluginCtx);
+        sharedIndexBuilders.set(agentId, builder);
+        console.log(`[evo-cortex] Shared IndexBuilder initialized for agent: ${agentId}`);
+        return builder;
+      } catch (err: any) {
+        console.warn(`[evo-cortex] IndexBuilder init failed for ${agentId} (will use layered search): ${err.message}`);
+        return null;
+      }
+    };
+
     // ========== 注册工具（使用工厂函数模式）==========
 
     // 1. 记忆搜索工具
@@ -154,6 +194,11 @@ const plugin = {
         verbose: config.verbose
       });
       const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
+      // 附加 IndexBuilder（如果可用，延迟初始化）
+      const indexBuilder = initIndexBuilder(pluginCtx);
+      if (indexBuilder) {
+        memoryHub.setIndexBuilder(indexBuilder);
+      }
 
       return {
         name: "search_memory",
@@ -229,7 +274,7 @@ const plugin = {
       };
     });
 
-    // 3. 索引管理工具
+    // 3. 索引管理工具（使用共享 IndexBuilder）
     api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
@@ -237,30 +282,67 @@ const plugin = {
         component: 'manage_index',
         verbose: config.verbose
       });
-      const memoryIndexer = new MemoryIndexer(pluginCtx);
-      memoryIndexer.init();
 
       return {
         name: "manage_index",
-        description: "管理记忆索引 - 查看统计信息",
+        description: "管理记忆索引 - 查看统计信息、重建索引",
         parameters: Type.Object({
           action: Type.String({
             description: "操作类型",
-            enum: ["stats"]
-          })
+            enum: ["stats", "rebuild", "update"]
+          }),
+          mode: Type.Optional(Type.String({
+            description: "重建模式：full=全量 | incremental=增量",
+            enum: ["full", "incremental"],
+            default: "incremental"
+          }))
         }),
         async execute(_id: string, params: any) {
           try {
             toolLogger.debug(`Action: ${params.action}`);
+            const memoryIndexer = getOrCreateSharedMemoryIndexer(pluginCtx);
 
             if (params.action === "stats") {
               const stats = memoryIndexer.getStats();
-              toolLogger.info(`Stats: ${stats.documents} documents`);
+              // 同时获取 FTS + vector 统计
+              try {
+                const builder = memoryIndexer.getIndexBuilder();
+                builder.init();
+                const indexStats = await builder.getStats();
+                return {
+                  content: [{
+                    type: "text" as const,
+                    text: JSON.stringify({ json: stats, fts_vector: indexStats }, null, 2)
+                  }]
+                };
+              } catch {
+                return {
+                  content: [{
+                    type: "text" as const,
+                    text: JSON.stringify(stats, null, 2)
+                  }]
+                };
+              }
+            }
+
+            if (params.action === "rebuild" || params.action === "update") {
+              const builder = memoryIndexer.getIndexBuilder();
+              builder.init();
+              const memDir = getMemoryStorageDir(pluginCtx);
+              const dirsToScan = [
+                memDir,
+                path.join(memDir, '..', 'weekly'),
+                path.join(memDir, '..', 'monthly'),
+              ].filter(d => fs.existsSync(d));
+
+              const result = params.action === "rebuild"
+                ? await builder.rebuild(dirsToScan)
+                : await builder.update(dirsToScan);
 
               return {
                 content: [{
                   type: "text" as const,
-                  text: JSON.stringify(stats, null, 2)
+                  text: JSON.stringify(result, null, 2)
                 }]
               };
             }
@@ -268,11 +350,63 @@ const plugin = {
             return {
               content: [{
                 type: "text" as const,
-                text: "Unknown action. Supported: stats"
+                text: "Unknown action. Supported: stats, rebuild, update"
               }]
             };
           } catch (error: any) {
             toolLogger.error('Index operation failed', error);
+            return {
+              content: [{
+                type: "text" as const,
+                text: `Error: ${error.message}`
+              }]
+            };
+          }
+        }
+      };
+    });
+
+    // 3b. 统一搜索工具（使用共享 IndexBuilder）
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'search_index',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "search_index",
+        description: "统一搜索记忆索引 - FTS 全文 + 向量语义融合搜索",
+        parameters: Type.Object({
+          query: Type.String({ description: "搜索查询" }),
+          top_k: Type.Optional(Type.Number({ description: "返回结果数量", default: 5 })),
+          embedding_enabled: Type.Optional(Type.Boolean({
+            description: "是否启用向量搜索",
+            default: true
+          }))
+        }),
+        async execute(_id: string, params: any) {
+          try {
+            toolLogger.debug(`Unified search: "${params.query}" (top_k: ${params.top_k || 5})`);
+            const memoryIndexer = getOrCreateSharedMemoryIndexer(pluginCtx);
+            const builder = memoryIndexer.getIndexBuilder();
+            builder.init();
+            const results = await builder.unifiedSearch(
+              params.query,
+              params.top_k || 5,
+              params.embedding_enabled !== false
+            );
+            toolLogger.info(`Found ${results.length} results`);
+
+            return {
+              content: [{
+                type: "text" as const,
+                text: JSON.stringify(results, null, 2)
+              }]
+            };
+          } catch (error: any) {
+            toolLogger.error('Unified search failed', error);
             return {
               content: [{
                 type: "text" as const,
@@ -595,12 +729,24 @@ const plugin = {
       } catch { return null; }
     }
 
+    // 轻量级 shouldEnhance 判断（内联版本，避免导入 hooks 模块）
+    function shouldEnhanceMessage(content: string): boolean {
+      if (!content || content.trim().length < 4) return false;
+      const lower = content.toLowerCase();
+      const triggers = [
+        "之前做过", "之前说过", "还记得", "记得吗", "上次", "以前",
+        "推荐", "建议", "方案", "怎么", "如何", "什么", "哪个",
+        "继续", "然后", "接下来", "还有", "补充", "详细",
+        "history", "remember", "previous", "last time", "continue",
+        "recommend", "suggest", "more", "detail"
+      ];
+      return triggers.some(t => lower.includes(t.toLowerCase()));
+    }
+
     api.on(
       "message_received",
       async (message: any, hookCtx: any) => {
         try {
-          // message_received hookCtx does NOT contain agentId/workspaceDir
-          // Parse agentId from sessionKey (format: "agent:{agentId}:{suffix}")
           const sessionKey = hookCtx?.sessionKey || '';
           const parts = sessionKey.split(':');
           const agentId = parts.length >= 2 ? parts[1] : 'main';
@@ -623,11 +769,21 @@ const plugin = {
             const prefFile = path.join(workspaceDir, 'memory', agentId, 'USER_PREFERENCES.md');
             const hookLogger = getLogger({ component: 'session_scanner' });
 
-            // fire-and-forget：不阻塞 hook 返回
+            // fire-and-forget：扫描完成后自动触发增量索引更新
             scanNewSessions(agentId, dataDir, sessionsPath, prefFile, hookLogger)
-              .then(r => {
+              .then(async r => {
                 if (r.new_sessions > 0) {
                   hookLogger.info(`scan: ${r.new_sessions} new, ${r.messages_written} msgs, ${r.preferences_extracted} prefs in ${r.duration_ms}ms`);
+                  // 自动增量更新索引（不阻塞对话）
+                  try {
+                    const memoryIndexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
+                    const builder = memoryIndexer.getIndexBuilder();
+                    const memoryDir = getMemoryStorageDir({ agentId, workspaceDir } as any);
+                    await builder.update([memoryDir]);
+                    hookLogger.info('incremental index update completed');
+                  } catch (err: any) {
+                    hookLogger.warn(`incremental index update failed: ${err.message}`);
+                  }
                 }
               })
               .catch(err => hookLogger.error('scan failed', err));
@@ -637,20 +793,48 @@ const plugin = {
           const summary = await memoryHub.getRecentDailySummary(2);
           if (summary) injectionParts.push(`\n=== 最近记忆 ===\n${summary}\n=== 结束 ===\n`);
 
+          // 语义检索增强 — 根据用户消息内容决定是否搜索记忆（带超时保护）
+          const userContent = message?.content || message?.text || '';
+          if (shouldEnhanceMessage(userContent)) {
+            try {
+              const searchTimeout = new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error('search timeout')), 2000)
+              );
+              const memories = await Promise.race([
+                memoryHub.search(userContent, 3),
+                searchTimeout
+              ]) as any[];
+
+              if (memories && memories.length > 0) {
+                const contextLines = memories.slice(0, 3).map((m: any, i: number) => {
+                  const title = m.title || m.topic || `记忆${i + 1}`;
+                  const snippet = (m.content || m.summary || '').substring(0, 200);
+                  return `[${title}] ${snippet}`;
+                }).join('\n');
+                injectionParts.push(`\n=== 相关记忆 ===\n${contextLines}\n=== 结束 ===\n`);
+              }
+            } catch (err: any) {
+              // 搜索超时或失败不影响正常对话，静默降级
+              if (err.message !== 'search timeout') {
+                getLogger({ component: 'message_received' }).debug(`semantic search skipped: ${err.message}`);
+              }
+            }
+          }
+
           if (injectionParts.length === 0) return {};
           return { system_prompt_addition: injectionParts.join('\n') };
         } catch (error: any) {
-          logger.error('light_received hook failed', error);
+          logger.error('message_received hook failed', error);
           return {};
         }
       },
       {
         name: "evo-cortex-light-received",
-        description: "Inject user preferences and recent memory summary (lightweight, <5ms)",
+        description: "Inject user preferences, recent memory summary, and semantic search results (lightweight)",
         entry: {
           hook: {
             name: "evo-cortex-light-received",
-            description: "Inject user preferences and recent memory summary (lightweight, <5ms)"
+            description: "Inject user preferences, recent memory summary, and semantic search results (lightweight)"
           }
         }
       }

@@ -12,7 +12,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { PluginContext, getKnowledgeStorageDir } from "../utils/plugin-context";
 import { SemanticSearch, SearchableDocument } from "../memory/semantic_search";
-import { getEmbedding, getEmbeddingLevel, keywordScore } from "../memory/embedding_provider";
+import { getEmbedding, getEmbeddingLevel, simpleKeywordMatch } from "../memory/embedding_provider";
 import { cosineSimilarity } from "../memory/embedding_cache";
 
 export interface KnowledgeEntity {
@@ -124,7 +124,7 @@ export class KnowledgeGraph {
     // 优先使用已有 embedding
     let entityEmb = entity.embedding;
     if (!entityEmb) {
-      try { entityEmb = await getEmbedding(`${entity.name} ${entity.description || ''} ${entity.type}`); }
+      try { const emb = await getEmbedding(`${entity.name} ${entity.description || ''} ${entity.type}`); entityEmb = emb || undefined; }
       catch { return; }
     }
     if (!entityEmb) return;
@@ -132,7 +132,7 @@ export class KnowledgeGraph {
     for (const candidate of candidates) {
       let candEmb = candidate.embedding;
       if (!candEmb) {
-        try { candEmb = await getEmbedding(`${candidate.name} ${candidate.description || ''} ${candidate.type}`); }
+        try { const emb = await getEmbedding(`${candidate.name} ${candidate.description || ''} ${candidate.type}`); candEmb = emb || undefined; }
         catch { continue; }
       }
       if (!candEmb || candEmb.length !== entityEmb.length) continue;
@@ -251,7 +251,7 @@ export class KnowledgeGraph {
       for (const entity of this.entities.values()) {
         if (domain && entity.type !== domain) continue;
         const textToSearch = `${entity.name} ${entity.description || ''} ${entity.type}`;
-        const score = keywordScore(query, textToSearch);
+        const score = simpleKeywordMatch(query, textToSearch);
         if (score > 0) {
           results.push({ entity, relations: this.getRelationsForEntity(entity.id), score });
         }
@@ -382,7 +382,9 @@ export class KnowledgeGraph {
     try {
       const entitiesPath = path.join(this.storageDir, "entities.json");
       if (fs.existsSync(entitiesPath)) {
-        const entities: KnowledgeEntity[] = JSON.parse(fs.readFileSync(entitiesPath, "utf8"));
+        const raw = JSON.parse(fs.readFileSync(entitiesPath, "utf8"));
+        // Handle both array format and wrapped object format { entities: [...], metadata: {...} }
+        const entities: KnowledgeEntity[] = Array.isArray(raw) ? raw : (raw.entities || []);
         for (const e of entities) {
           this.entities.set(e.id, e);
           this.addToSemanticSearch(e).catch(() => {});
@@ -390,7 +392,8 @@ export class KnowledgeGraph {
       }
       const relationsPath = path.join(this.storageDir, "relations.json");
       if (fs.existsSync(relationsPath)) {
-        this.relations = JSON.parse(fs.readFileSync(relationsPath, "utf8"));
+        const raw = JSON.parse(fs.readFileSync(relationsPath, "utf8"));
+        this.relations = Array.isArray(raw) ? raw : (raw.relations || []);
       }
       console.log(`[KnowledgeGraph] Loaded ${this.entities.size} entities, ${this.relations.length} relations`);
     } catch (err) { console.error("[KnowledgeGraph] Load error:", err); }

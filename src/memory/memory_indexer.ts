@@ -1,12 +1,14 @@
 /**
  * 记忆索引器
- * 
- * 使用 JSON 文件存储索引
+ *
+ * 使用 JSON 文件存储索引 + FTS5 全文搜索 + 向量语义搜索
+ * 兼容旧版 JSON 索引，同时支持新的 FTS + vector 索引
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { PluginContext, getDataDir } from '../utils/plugin-context';
+import { IndexBuilder } from './index_builder';
 
 export interface Document {
   id: string;
@@ -167,14 +169,21 @@ export class MemoryIndexer {
   }
 
   /**
-   * 搜索文档
+   * 搜索文档（关键词 fallback）
    */
   search(query: string, limit: number = 10): Document[] {
     const queryLower = query.toLowerCase();
-    
+
     return this.documents
       .filter(doc => doc.content.toLowerCase().includes(queryLower))
       .slice(0, limit);
+  }
+
+  /**
+   * 获取 IndexBuilder 实例（用于 FTS + 向量搜索）
+   */
+  getIndexBuilder(): IndexBuilder {
+    return new IndexBuilder(this.ctx);
   }
 
   /**

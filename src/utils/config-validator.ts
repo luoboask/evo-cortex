@@ -9,7 +9,7 @@ import type { KnowledgeConfig } from "../knowledge/knowledge_graph";
 import type { EvolutionConfig } from "../evolution/scheduler";
 
 export type EmbeddingMode = "auto" | "semantic" | "keyword";
-export type EmbeddingFallback = "tfidf" | "keyword";
+export type EmbeddingFallback = "fts" | "keyword";
 
 export interface EmbeddingConfig {
   enabled: boolean;
@@ -61,7 +61,7 @@ const DEFAULT_CONFIG: ValidatedConfig = {
   embedding: {
     enabled: true,
     mode: "auto",
-    fallback: "tfidf"
+    fallback: "fts"
   },
   retention: {
     daily: 14,
@@ -216,10 +216,10 @@ function validateEmbeddingConfig(input: any): Partial<EmbeddingConfig> {
     console.warn(`[Config] Invalid embedding.mode: ${input.mode}. Must be auto|semantic|keyword.`);
   }
 
-  if (input.fallback === 'tfidf' || input.fallback === 'keyword') {
+  if (input.fallback === 'fts' || input.fallback === 'keyword') {
     config.fallback = input.fallback;
   } else if (input.fallback !== undefined) {
-    console.warn(`[Config] Invalid embedding.fallback: ${input.fallback}. Must be tfidf|keyword.`);
+    console.warn(`[Config] Invalid embedding.fallback: ${input.fallback}. Must be fts|keyword.`);
   }
 
   return config;
