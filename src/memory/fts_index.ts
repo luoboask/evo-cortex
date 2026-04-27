@@ -200,6 +200,23 @@ export class FtsIndex {
   }
 
   /**
+   * 按前缀列出文档 ID（用于迁移清理）
+   */
+  listByPrefix(prefix: string): Promise<string[]> {
+    this.ensureInit();
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        'SELECT id FROM fts_docs WHERE id LIKE ?',
+        [`${prefix}%`],
+        (err: Error | null, rows: any[]) => {
+          if (err) return reject(err);
+          resolve((rows || []).map((r: any) => r.id as string));
+        }
+      );
+    });
+  }
+
+  /**
    * 删除文档
    */
   remove(id: string): Promise<boolean> {

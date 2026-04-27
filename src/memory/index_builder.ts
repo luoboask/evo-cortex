@@ -184,14 +184,14 @@ export class IndexBuilder {
 
       // 读取 WM + LTM 条目，排除已索引的（增量）
       const indexedIds = Object.keys(this.dbIndexState);
-      const placeholder = indexedIds.length > 0
-        ? `AND id NOT IN (${indexedIds.map(() => '?').join(',')})`
+      const whereClause = indexedIds.length > 0
+        ? `WHERE id NOT IN (${indexedIds.map(() => '?').join(',')})`
         : '';
       const params = indexedIds.length > 0 ? indexedIds : [];
 
       const [wmRows, ltmRows] = await Promise.all([
-        dbAll(`SELECT id, type, title, content, importance, tags, source, source_ref, created_at FROM working_memory ${placeholder}`, params),
-        dbAll(`SELECT id, type, title, content, importance, tags, source, source_ref, created_at, consolidated_from FROM long_term_memory ${placeholder}`, params),
+        dbAll(`SELECT id, type, title, content, importance, tags, source, source_ref, created_at FROM working_memory ${whereClause}`, params),
+        dbAll(`SELECT id, type, title, content, importance, tags, source, source_ref, created_at, consolidated_from FROM long_term_memory ${whereClause}`, params),
       ]);
       db.close();
 
@@ -266,6 +266,19 @@ export class IndexBuilder {
         await this.ftsIndex.remove(oldDocId);
         await this.vectorStore.remove(oldDocId);
         delete this.dbIndexState[oldWmId];
+      }
+
+      // 迁移清理：删除旧版文件扫描遗留的 file_* 条目（rebuild/update 已删除）
+      // 每次运行都会检查，幂等操作，无 file_* 条目时开销可忽略
+      const fileDocIds = await this.ftsIndex.listByPrefix('file_');
+      let cleanedFiles = 0;
+      for (const docId of fileDocIds) {
+        await this.ftsIndex.remove(docId);
+        await this.vectorStore.remove(docId);
+        cleanedFiles++;
+      }
+      if (cleanedFiles > 0) {
+        console.log(`[IndexBuilder] migrated ${cleanedFiles} legacy file-scan entries from FTS index`);
       }
 
       // 清理 dbIndexState 中已不存在的条目（TTL 删除、手动删除等）
