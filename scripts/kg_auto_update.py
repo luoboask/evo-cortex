@@ -17,6 +17,8 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from collections import Counter
 
+import jieba
+
 ENTITY_TYPE_RULES = [
     (r'(?:React|Vue|Angular|Svelte|Next\.js|Nuxt|Node\.js|Python|TypeScript|JavaScript|Go|Rust|Java|Swift|Kotlin)', '框架/语言'),
     (r'(?:SQLite|PostgreSQL|MySQL|MongoDB|Redis|WAL|FTS5)', '数据库'),
@@ -49,6 +51,12 @@ ENTITY_NOISE = {
     'Python', '修复', '测试', '配置', '数据', '记录',
     '脚本', '执行', '数据库', '查询', '结果', '格式',
     '代码', '函数', '方法', '变量', '参数', '返回',
+    # 句子片段（之前从 LTM 提取出的垃圾）
+    '插件正常加载', '插件加载', '完全过滤', '正确配对',
+    '手动调用', '内容清洗', 'last', 'Phase',
+    '验证通过', '已完全打', '元规则注', '的模块',
+    '所有', '只有', '阶段', '实体', '项目', '警告',
+    '编译', '晋升', '提取', '停用词',
 }
 
 ENTITY_NOISE_CN = {
@@ -108,6 +116,31 @@ def extract_entities(text: str) -> list[str]:
     """提取候选实体（严格噪音过滤 + 质量门槛）"""
     entities = set()
 
+    # 0. 文本清洗：去除对话元数据和 Markdown 格式
+    lines = text.split('\n')
+    clean_lines = []
+    in_code_block = False
+    for line in lines:
+        stripped = line.strip()
+        # 跳过代码块
+        if stripped.startswith('```'):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        # 跳过 User/AI 标签（保留实际内容）
+        if stripped.startswith('User: ') or stripped.startswith('AI: '):
+            clean_lines.append(stripped.split(': ', 1)[-1])
+            continue
+        # 跳过 Markdown 表头和分隔线
+        if stripped.startswith('|---') or stripped.startswith('| **') or stripped.startswith('##'):
+            continue
+        # 跳过空行
+        if not stripped:
+            continue
+        clean_lines.append(stripped)
+    text = ' '.join(clean_lines)
+
     # 1. 技术术语模式（英文）
     for pattern in TECH_PATTERNS:
         for m in re.findall(pattern, text):
@@ -117,22 +150,17 @@ def extract_entities(text: str) -> list[str]:
         if w not in ENTITY_NOISE:
             entities.add(w)
 
-    # 2. 中文实体提取——只保留已知技术概念和复合词，不提取碎片词
-    #    使用白名单模式：[修饰词]+[核心词] 结构（如"知识图谱"、"语义搜索"）
-    #    排除：代词碎片（"的模块"、"只有"）、副词（"所有"、"已完全打"）
-    cn_tech_patterns = [
-        # 技术复合词（4+ 字，非碎片）
-        r'[\u4e00-\u9fff]{4,6}',
-        # 已知技术概念前缀 + 核心词
-        r'(?:语义|向量|索引|数据库|消息|会话|插件|管道|记忆|实体|关系|规则|知识|进化|压缩|扫描|嵌入|融合|架构|配置|调度|部署|集群|容器|服务|网关|代理|路由|缓存|队列|触发|监听|回调|同步|异步|并发|线程|进程|守护|自动|手动|持久|临时|备份|恢复|迁移|转换|解析|编译|构建|测试|调试|日志|监控|告警|指标|统计|分析|预测|分类|聚类|推荐|搜索|过滤|排序|去重|合并|拆分|压缩|加密|解密|认证|授权|权限|审计|追踪|调试)[\u4e00-\u9fff]{2,4}',
+    # 2. 中文实体提取——已知技术术语白名单检测（不用分词）
+    #    扫描文本中是否出现了这些已验证的技术概念
+    KNOWN_CN_TERMS = [
+        '知识图谱', '向量索引', '语义搜索', '消息管道', '记忆系统', '长期记忆',
+        '工作记忆', '实体关系', '元规则注入', '规则注入', '上下文增强', '记忆摘要',
+        '每日压缩', '每周压缩', '主动学习', '夜间进化', '内容清洗', '索引构建',
+        '数据源统一', '自进化', '因果关系', '矛盾检测', '知识提取', '概念网络',
     ]
-    for pattern in cn_tech_patterns:
-        for w in re.findall(pattern, text):
-            if len(w) >= 4 and w not in ENTITY_NOISE_CN and w not in ENTITY_NOISE:
-                # 排除明显的碎片词：以"的"、"了"、"在"、"是"开头或结尾
-                if w[0] not in ('的', '了', '在', '是', '有', '就', '都', '也', '只', '已', '所'):
-                    if w[-1] not in ('的', '了', '着', '过', '吗', '呢', '吧'):
-                        entities.add(w)
+    for term in KNOWN_CN_TERMS:
+        if term in text:
+            entities.add(term)
 
     return list(entities)
 
