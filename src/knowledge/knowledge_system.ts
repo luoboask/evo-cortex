@@ -71,6 +71,19 @@ export interface SearchQuery {
   limit?: number;
 }
 
+// ========== 兼容旧 knowledge_graph.ts 的类型 ==========
+
+export interface KnowledgeConfig {
+  enabled: boolean;
+  auto_expand: boolean;
+}
+
+export interface KnowledgeSearchResult {
+  entity: KnowledgeEntity;
+  relations: KnowledgeRelation[];
+  score: number;
+}
+
 // ========== 实体类型关键词映射 ==========
 
 const ENTITY_TYPE_KEYWORDS: Record<string, RegExp[]> = {

@@ -545,7 +545,8 @@ export class MemoryHub {
     return timestamp.substring(0, 7);
   }
 
-  private async persist(entry: MemoryEntry): Promise<void> {
+  /** 将单条记忆持久化到 memory/*.md（供 agent_end hook 调用） */
+  async persistToMarkdown(entry: MemoryEntry): Promise<void> {
     try {
       const dateStrValue = dateStr(new Date(entry.timestamp));
       // 按类型分目录存储
@@ -556,6 +557,10 @@ export class MemoryHub {
       const filePath = path.join(dir, `${dateStrValue}.md`);
       fs.appendFileSync(filePath, this.formatMemoryAsMarkdown(entry) + '\n', 'utf8');
     } catch (err) { console.error('[MemoryHub] Persist error:', err); }
+  }
+
+  private async persist(entry: MemoryEntry): Promise<void> {
+    await this.persistToMarkdown(entry);
   }
 
   private async load(): Promise<void> {

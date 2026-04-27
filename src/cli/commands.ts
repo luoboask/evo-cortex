@@ -7,7 +7,8 @@
 import type { OpenClawPluginCliContext } from "openclaw/plugin-sdk/core";
 import { buildPluginContext } from "../utils/plugin-context";
 import { MemoryHub } from "../memory/memory_hub";
-import { KnowledgeGraph } from "../knowledge/knowledge_graph";
+import { KnowledgeSystem } from "../knowledge/knowledge_system";
+import { getDataDir } from "../utils/plugin-context";
 import { SessionScanner } from "./../memory/session_scanner";
 
 export function registerCliCommands(ctx: OpenClawPluginCliContext, config: any) {
@@ -28,8 +29,10 @@ export function registerCliCommands(ctx: OpenClawPluginCliContext, config: any) 
           storageBaseDir: process.env.HOME ? `${process.env.HOME}/.openclaw` : '/tmp/.openclaw'
         });
         
-        const knowledgeGraph = new KnowledgeGraph(pluginCtx, config.knowledge);
-        const results = await knowledgeGraph.search(query, domain);
+        const dataDir = getDataDir(pluginCtx);
+        const ks = new KnowledgeSystem(pluginCtx.agentId, dataDir);
+        await ks.init();
+        const results = await ks.searchEntities(query);
         
         if (options.json) {
           console.log(JSON.stringify(results, null, 2));
@@ -39,11 +42,9 @@ export function registerCliCommands(ctx: OpenClawPluginCliContext, config: any) 
             console.log('未找到相关知识。\n');
           } else {
             results.forEach((result, i) => {
-              console.log(`${i + 1}. ${result.entity.name} (${result.entity.type})`);
-              console.log(`   相关性：${(result.score * 100).toFixed(1)}%`);
-              if (result.relations.length > 0) {
-                console.log(`   关联：${result.relations.map(r => r.type).join(', ')}`);
-              }
+              console.log(`${i + 1}. ${result.name} (${result.type})`);
+              console.log(`   重要性：${result.importance.toFixed(1)}`);
+              console.log(`   提及次数：${result.mentionCount}`);
               console.log();
             });
           }
@@ -144,15 +145,18 @@ export function registerCliCommands(ctx: OpenClawPluginCliContext, config: any) 
           storageBaseDir: process.env.HOME ? `${process.env.HOME}/.openclaw` : '/tmp/.openclaw'
         });
         
-        const knowledgeGraph = new KnowledgeGraph(pluginCtx, config.knowledge);
-        const stats = knowledgeGraph.getStats();
+        const dataDir = getDataDir(pluginCtx);
+        const ks = new KnowledgeSystem(pluginCtx.agentId, dataDir);
+        await ks.init();
+        const stats = await ks.getStats();
         
         if (options.json) {
           console.log(JSON.stringify(stats, null, 2));
         } else {
           console.log(`\n📚 知识图谱统计 (${pluginCtx.agentId})\n`);
-          console.log(`  实体总数：${stats.totalEntities}`);
-          console.log(`  关系总数：${stats.totalRelations}`);
+          console.log(`  实体总数：${stats.entities}`);
+          console.log(`  关系总数：${stats.relations}`);
+          console.log(`  规则总数：${stats.rules}`);
           console.log('\n  按类型分布:');
           for (const [type, count] of Object.entries(stats.byType)) {
             console.log(`    ${type}: ${count}`);

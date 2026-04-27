@@ -7,6 +7,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { createRequire } from 'module';
+const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
 import { PluginContext, getDataDir, getMemoryStorageDir } from '../utils/plugin-context';
 import { FtsIndex, FtsDocument } from './fts_index';
 import { VectorIndexStore, VectorDocument } from './vector_index';
@@ -17,11 +19,13 @@ import { SearchableDocument } from './semantic_search';
 
 export interface IndexBuildResult {
   success: boolean;
-  mode: 'full' | 'incremental';
+  mode: 'full' | 'incremental' | 'database';
   filesScanned: number;
   filesIndexed: number;
   filesUpdated: number;
   filesSkipped: number;
+  dbRowsScanned: number;
+  dbRowsIndexed: number;
   ftsCount: number;
   vectorCount: number;
   embeddingLevel: string;
@@ -52,7 +56,7 @@ export class IndexBuilder {
   private ftsIndex: FtsIndex;
   private vectorStore: VectorIndexStore;
   private statePath: string;
-  private fileState: Record<string, { mtime: number; indexedAt: string }> = {};
+  private dbIndexState: Record<string, { indexedAt: string; table: string }> = {}; // wm_xxx / ltm_xxx → 索引状态
 
   constructor(ctx: PluginContext) {
     this.ctx = ctx;
@@ -68,54 +72,6 @@ export class IndexBuilder {
   init(): void {
     this.ftsIndex.init();
     this.vectorStore.init();
-  }
-
-  /**
-   * 全量重建索引
-   */
-  async rebuild(memoryDirs: string[]): Promise<IndexBuildResult> {
-    const startTime = Date.now();
-    const errors: string[] = [];
-
-    console.log('[IndexBuilder] Starting full rebuild...');
-
-    // 清空旧索引
-    await this.ftsIndex.clear();
-    await this.vectorStore.clear();
-    this.fileState = {};
-
-    // 扫描并索引
-    const result = await this.doIndex(memoryDirs, 'full', errors);
-    result.durationMs = Date.now() - startTime;
-
-    if (errors.length > 0) {
-      result.success = false;
-    }
-
-    this.saveState();
-    console.log(`[IndexBuilder] Full rebuild complete: ${result.filesIndexed} indexed, ${result.filesSkipped} skipped, ${errors.length} errors in ${result.durationMs}ms`);
-    return result;
-  }
-
-  /**
-   * 增量更新索引
-   */
-  async update(memoryDirs: string[]): Promise<IndexBuildResult> {
-    const startTime = Date.now();
-    const errors: string[] = [];
-
-    console.log('[IndexBuilder] Starting incremental update...');
-
-    const result = await this.doIndex(memoryDirs, 'incremental', errors);
-    result.durationMs = Date.now() - startTime;
-
-    if (errors.length > 0) {
-      result.success = false;
-    }
-
-    this.saveState();
-    console.log(`[IndexBuilder] Incremental update complete: ${result.filesIndexed} indexed, ${result.filesUpdated} updated, ${result.filesSkipped} skipped, ${errors.length} errors in ${result.durationMs}ms`);
-    return result;
   }
 
   /**
@@ -187,20 +143,141 @@ export class IndexBuilder {
       this.vectorStore.getStats()
     ]);
 
-    const indexedFiles = Object.keys(this.fileState);
-    const lastEntry = indexedFiles.length > 0
-      ? this.fileState[indexedFiles[indexedFiles.length - 1]]
-      : undefined;
-
     return {
       fts,
       vector,
-      fileState: {
-        total: indexedFiles.length,
-        indexed: indexedFiles.slice(-20) // 最近 20 个
-      },
-      lastBuild: lastEntry?.indexedAt
+      fileState: { total: 0, indexed: [] },
+      lastBuild: undefined
     };
+  }
+
+  /**
+   * 从 memory.db 直接索引（跳过 .md 中间层）
+   * 索引 working_memory（活跃） + long_term_memory（晋升）
+   * 通过 dbIndexState 做增量更新，避免重复索引
+   */
+  async buildFromDb(): Promise<IndexBuildResult> {
+    const startTime = Date.now();
+    const errors: string[] = [];
+    const result: IndexBuildResult = {
+      success: true,
+      mode: 'database',
+      filesScanned: 0, filesIndexed: 0, filesUpdated: 0, filesSkipped: 0,
+      dbRowsScanned: 0, dbRowsIndexed: 0,
+      ftsCount: 0, vectorCount: 0,
+      embeddingLevel: getEmbeddingLevel(),
+      durationMs: 0, errors
+    };
+
+    try {
+      const dataDir = getDataDir(this.ctx);
+      const dbPath = path.join(dataDir, 'memory.db');
+      if (!fs.existsSync(dbPath)) {
+        console.log('[IndexBuilder] buildFromDb skipped: memory.db not found');
+        return result;
+      }
+
+      const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY);
+      const dbAll = (sql: string, params: any[] = []): Promise<any[]> =>
+        new Promise((resolve, reject) =>
+          db.all(sql, params, (err: Error | null, rows: any[]) => err ? reject(err) : resolve(rows || [])));
+
+      // 读取 WM + LTM 条目，排除已索引的（增量）
+      const indexedIds = Object.keys(this.dbIndexState);
+      const placeholder = indexedIds.length > 0
+        ? `AND id NOT IN (${indexedIds.map(() => '?').join(',')})`
+        : '';
+      const params = indexedIds.length > 0 ? indexedIds : [];
+
+      const [wmRows, ltmRows] = await Promise.all([
+        dbAll(`SELECT id, type, title, content, importance, tags, source, source_ref, created_at FROM working_memory ${placeholder}`, params),
+        dbAll(`SELECT id, type, title, content, importance, tags, source, source_ref, created_at, consolidated_from FROM long_term_memory ${placeholder}`, params),
+      ]);
+      db.close();
+
+      result.dbRowsScanned = wmRows.length + ltmRows.length;
+      if (result.dbRowsScanned === 0) {
+        console.log(`[IndexBuilder] buildFromDb: no new rows to index`);
+        return result;
+      }
+
+      // 合并为文档列表，用 original_id 去重（WM 晋升到 LTM 后 WM 条目被删除）
+      const allRows = [
+        ...wmRows.map((r: any) => ({ ...r, _table: 'working_memory' })),
+        ...ltmRows.map((r: any) => ({ ...r, _table: 'long_term_memory' })),
+      ];
+
+      const ftsDocs: FtsDocument[] = [];
+      const vecDocs: VectorDocument[] = [];
+
+      for (const row of allRows) {
+        const docId = `db_${row.id}`;
+        const content = row.content || '';
+        if (!content || content.trim().length < 10) continue; // 跳过太短的条目
+
+        ftsDocs.push({
+          id: docId,
+          content,
+          metadata: { type: row.type, table: row._table, importance: row.importance, source: row.source }
+        });
+
+        // 向量索引：内容分块（每块 ~500 字符）
+        const chunks = this.splitContent(content);
+        for (let i = 0; i < chunks.length; i++) {
+          vecDocs.push({
+            id: `${docId}_chunk_${i}`,
+            content: chunks[i],
+            embedding: [],
+            metadata: { type: row.type, table: row._table, chunk: i }
+          });
+        }
+
+        this.dbIndexState[row.id] = { indexedAt: new Date().toISOString(), table: row._table };
+        result.dbRowsIndexed++;
+      }
+
+      // 批量索引 FTS
+      if (ftsDocs.length > 0) {
+        result.ftsCount = await this.ftsIndex.indexBatch(ftsDocs);
+      }
+
+      // 批量计算向量 embedding
+      if (vecDocs.length > 0) {
+        const texts = vecDocs.map(d => d.content);
+        const embeddings = await getEmbeddingsBatch(texts);
+        let vecCount = 0;
+        for (let i = 0; i < vecDocs.length; i++) {
+          if (embeddings[i]) {
+            vecDocs[i].embedding = embeddings[i]!;
+            await this.vectorStore.upsert(vecDocs[i]);
+            vecCount++;
+          }
+        }
+        result.vectorCount = vecCount;
+      }
+
+      // 清理已删除的 WM 条目索引（WM 晋升后被删除，但索引可能残留）
+      const ltmConsolidatedFrom = ltmRows
+        .filter((r: any) => r.consolidated_from)
+        .map((r: any) => r.consolidated_from);
+      for (const oldWmId of ltmConsolidatedFrom) {
+        const oldDocId = `db_wm_${oldWmId}`;
+        await this.ftsIndex.remove(oldDocId);
+        await this.vectorStore.remove(oldDocId);
+        delete this.dbIndexState[oldWmId];
+      }
+
+      result.durationMs = Date.now() - startTime;
+      console.log(`[IndexBuilder] buildFromDb: scanned=${result.dbRowsScanned}, indexed=${result.dbRowsIndexed}, fts=${result.ftsCount}, vec=${result.vectorCount} in ${result.durationMs}ms`);
+    } catch (err: any) {
+      errors.push(`buildFromDb failed: ${err.message}`);
+      result.success = false;
+      result.durationMs = Date.now() - startTime;
+      console.error('[IndexBuilder] buildFromDb error:', err);
+    }
+
+    this.saveState();
+    return result;
   }
 
   /**
@@ -209,125 +286,6 @@ export class IndexBuilder {
   close(): void {
     this.ftsIndex.close();
     this.vectorStore.close();
-  }
-
-  // ========== 私有方法 ==========
-
-  /** 执行索引 */
-  private async doIndex(memoryDirs: string[], mode: 'full' | 'incremental', errors: string[]): Promise<IndexBuildResult> {
-    const result: IndexBuildResult = {
-      success: true,
-      mode,
-      filesScanned: 0,
-      filesIndexed: 0,
-      filesUpdated: 0,
-      filesSkipped: 0,
-      ftsCount: 0,
-      vectorCount: 0,
-      embeddingLevel: getEmbeddingLevel(),
-      durationMs: 0,
-      errors
-    };
-
-    // 收集所有需要索引的文档
-    const docsToIndex: FtsDocument[] = [];
-    const vecDocsToIndex: VectorDocument[] = [];
-
-    for (const dir of memoryDirs) {
-      if (!fs.existsSync(dir)) continue;
-
-      const files = this.collectMdFiles(dir);
-      result.filesScanned += files.length;
-
-      for (const filePath of files) {
-        const stat = fs.statSync(filePath);
-        const mtime = stat.mtimeMs;
-        const state = this.fileState[filePath];
-
-        // 增量模式：跳过未变更文件
-        if (mode === 'incremental' && state && state.mtime === mtime) {
-          result.filesSkipped++;
-          continue;
-        }
-
-        try {
-          const content = fs.readFileSync(filePath, 'utf-8');
-          const docId = `file_${this.hashPath(filePath)}`;
-
-          docsToIndex.push({
-            id: docId,
-            content,
-            metadata: { path: filePath, type: 'file', mtime: stat.mtime.toISOString() }
-          });
-
-          // 向量索引：将内容分块（每块 ~500 字符）
-          const chunks = this.splitContent(content);
-          for (let i = 0; i < chunks.length; i++) {
-            vecDocsToIndex.push({
-              id: `${docId}_chunk_${i}`,
-              content: chunks[i],
-              embedding: [], // 稍后批量计算
-              metadata: { path: filePath, chunk: i, totalChunks: chunks.length }
-            });
-          }
-
-          this.fileState[filePath] = {
-            mtime,
-            indexedAt: new Date().toISOString()
-          };
-
-          if (state) {
-            result.filesUpdated++;
-          } else {
-            result.filesIndexed++;
-          }
-        } catch (err: any) {
-          errors.push(`Failed to index ${filePath}: ${err.message}`);
-        }
-      }
-    }
-
-    // 批量索引 FTS
-    if (docsToIndex.length > 0) {
-      result.ftsCount = await this.ftsIndex.indexBatch(docsToIndex);
-    }
-
-    // 批量计算向量 embedding
-    if (vecDocsToIndex.length > 0) {
-      const texts = vecDocsToIndex.map(d => d.content);
-      const embeddings = await getEmbeddingsBatch(texts);
-
-      let vecCount = 0;
-      for (let i = 0; i < vecDocsToIndex.length; i++) {
-        if (embeddings[i]) {
-          vecDocsToIndex[i].embedding = embeddings[i]!;
-          await this.vectorStore.upsert(vecDocsToIndex[i]);
-          vecCount++;
-        }
-      }
-      result.vectorCount = vecCount;
-    }
-
-    return result;
-  }
-
-  /** 递归收集 .md 文件 */
-  private collectMdFiles(dir: string): string[] {
-    const files: string[] = [];
-    try {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          // 跳过隐藏目录和 archive
-          if (entry.name.startsWith('.') || entry.name === 'archive') continue;
-          files.push(...this.collectMdFiles(fullPath));
-        } else if (entry.isFile() && entry.name.endsWith('.md')) {
-          files.push(fullPath);
-        }
-      }
-    } catch { /* ignore */ }
-    return files;
   }
 
   /** 将内容分块 */
@@ -362,30 +320,22 @@ export class IndexBuilder {
     return finalChunks;
   }
 
-  /** 路径哈希 */
-  private hashPath(p: string): string {
-    let hash = 0;
-    for (let i = 0; i < p.length; i++) {
-      const c = p.charCodeAt(i);
-      hash = ((hash << 5) - hash) + c;
-      hash = hash & hash;
-    }
-    return Math.abs(hash).toString(36);
-  }
-
   /** 加载状态 */
   private loadState(): void {
     try {
       if (fs.existsSync(this.statePath)) {
-        this.fileState = JSON.parse(fs.readFileSync(this.statePath, 'utf-8'));
+        const state = JSON.parse(fs.readFileSync(this.statePath, 'utf-8'));
+        this.dbIndexState = state.dbIndexState || {};
       }
-    } catch { this.fileState = {}; }
+    } catch { this.dbIndexState = {}; }
   }
 
   /** 保存状态 */
   private saveState(): void {
     try {
-      fs.writeFileSync(this.statePath, JSON.stringify(this.fileState, null, 2), 'utf-8');
+      fs.writeFileSync(this.statePath, JSON.stringify({
+        dbIndexState: this.dbIndexState
+      }, null, 2), 'utf-8');
     } catch (err) {
       console.error('[IndexBuilder] Save state error:', err);
     }

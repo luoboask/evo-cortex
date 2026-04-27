@@ -5,7 +5,7 @@
  */
 
 import type { MemoryConfig } from "../memory/memory_hub";
-import type { KnowledgeConfig } from "../knowledge/knowledge_graph";
+import type { KnowledgeConfig } from "../knowledge/knowledge_system";
 import type { EvolutionConfig } from "../evolution/scheduler";
 
 export type EmbeddingMode = "auto" | "semantic" | "keyword";

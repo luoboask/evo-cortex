@@ -6,9 +6,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { PluginContext, getMemoryStorageDir, getKnowledgeStorageDir } from '../utils/plugin-context';
+import { PluginContext, getMemoryStorageDir, getKnowledgeStorageDir, getDataDir } from '../utils/plugin-context';
 import { MemoryHub } from '../memory/memory_hub';
-import { KnowledgeGraph } from '../knowledge/knowledge_graph';
+import { KnowledgeSystem } from '../knowledge/knowledge_system';
 import { Cache } from '../utils/cache';
 
 export interface HealthReport {
@@ -85,10 +85,12 @@ export async function runHealthCheck(
 
   // ========== 检查知识图谱 ==========
   try {
-    const knowledgeGraph = new KnowledgeGraph(ctx, config.knowledge);
-    const stats = knowledgeGraph.getStats();
+    const dataDir = getDataDir(ctx);
+    const ks = new KnowledgeSystem(ctx.agentId, dataDir);
+    await ks.init();
+    const stats = await ks.getStats();
     
-    if (stats.totalEntities === 0) {
+    if (stats.entities === 0) {
       report.components.knowledge.issues.push('No knowledge entities yet');
     }
   } catch (error: any) {

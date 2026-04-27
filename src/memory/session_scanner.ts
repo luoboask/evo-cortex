@@ -15,7 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PluginContext, getDataDir } from '../utils/plugin-context';
 import { MemoryHub } from './memory_hub';
-import type { KnowledgeGraph } from '../knowledge/knowledge_graph';
+import type { KnowledgeSystem } from '../knowledge/knowledge_system';
 
 export interface SessionInfo {
   id: string;
@@ -86,7 +86,7 @@ export class SessionScanner {
   /**
    * 扫描所有会话 + 整合工作记忆
    */
-  async scan(knowledgeGraph?: KnowledgeGraph): Promise<ScanResult> {
+  async scan(knowledgeGraph?: KnowledgeSystem): Promise<ScanResult> {
     const result: ScanResult = {
       scanned: 0,
       newSessions: 0,
@@ -161,7 +161,7 @@ export class SessionScanner {
    * 5. 提取偏好（喜欢/不喜欢/格式要求）
    * 6. 标记已整合的工作记忆（延长 TTL 或标记）
    */
-  async consolidateWorkingMemory(knowledgeGraph?: KnowledgeGraph): Promise<number> {
+  async consolidateWorkingMemory(knowledgeGraph?: KnowledgeSystem): Promise<number> {
     if (!fs.existsSync(this.dbPath)) return 0;
 
     const sqlite3 = require('sqlite3').verbose();

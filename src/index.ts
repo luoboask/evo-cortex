@@ -4,7 +4,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { MemoryHub } from "./memory/memory_hub";
 import { MemorySystem } from "./memory/memory_system";
-import { KnowledgeGraph } from "./knowledge/knowledge_graph";
 import { KnowledgeSystem } from "./knowledge/knowledge_system";
 import { EvolutionScheduler } from "./evolution/scheduler";
 import { beforeToolCallHook } from "./hooks";
@@ -229,7 +228,9 @@ const plugin = {
         component: 'search_knowledge',
         verbose: config.verbose
       });
-      const knowledgeGraph = new KnowledgeGraph(pluginCtx, config.knowledge);
+      const dataDir = getDataDir(pluginCtx);
+      const ks = new KnowledgeSystem(pluginCtx.agentId, dataDir);
+      ks.init().catch(err => console.error('[evo-cortex] KnowledgeSystem init error:', err));
 
       return {
         name: "search_knowledge",
@@ -241,7 +242,7 @@ const plugin = {
         async execute(_id: string, params: any) {
           try {
             toolLogger.debug(`Searching knowledge: "${params.query}"${params.domain ? ` (domain: ${params.domain})` : ''}`);
-            const results = await knowledgeGraph.search(params.query, params.domain);
+            const results = await ks.searchEntities(params.query);
             toolLogger.info(`Found ${results.length} results`);
 
             return {
@@ -274,17 +275,12 @@ const plugin = {
 
       return {
         name: "manage_index",
-        description: "管理记忆索引 - 查看统计信息、重建索引",
+        description: "管理记忆索引 - 查看统计信息、从数据库重建索引",
         parameters: Type.Object({
           action: Type.String({
             description: "操作类型",
-            enum: ["stats", "rebuild", "update"]
-          }),
-          mode: Type.Optional(Type.String({
-            description: "重建模式：full=全量 | incremental=增量",
-            enum: ["full", "incremental"],
-            default: "incremental"
-          }))
+            enum: ["stats", "rebuild_db"]
+          })
         }),
         async execute(_id: string, params: any) {
           try {
@@ -314,19 +310,10 @@ const plugin = {
               }
             }
 
-            if (params.action === "rebuild" || params.action === "update") {
+            if (params.action === "rebuild_db") {
               const builder = memoryIndexer.getIndexBuilder();
               builder.init();
-              const memDir = getMemoryStorageDir(pluginCtx);
-              const dirsToScan = [
-                memDir,
-                path.join(memDir, '..', 'weekly'),
-                path.join(memDir, '..', 'monthly'),
-              ].filter(d => fs.existsSync(d));
-
-              const result = params.action === "rebuild"
-                ? await builder.rebuild(dirsToScan)
-                : await builder.update(dirsToScan);
+              const result = await builder.buildFromDb();
 
               return {
                 content: [{
@@ -339,7 +326,7 @@ const plugin = {
             return {
               content: [{
                 type: "text" as const,
-                text: "Unknown action. Supported: stats, rebuild, update"
+                text: "Unknown action. Supported: stats, rebuild_db"
               }]
             };
           } catch (error: any) {
@@ -879,14 +866,17 @@ const plugin = {
     });
 
     // ========== 实例缓存（避免每次 hook 都重建）==========
-    const hubCache = new Map<string, { memoryHub: MemoryHub; knowledgeGraph: KnowledgeGraph }>();
+    const hubCache = new Map<string, { memoryHub: MemoryHub; knowledgeSystem: KnowledgeSystem }>();
 
-    function getOrCreateHub(agentId: string, pluginCtx: any): { memoryHub: MemoryHub; knowledgeGraph: KnowledgeGraph } {
+    function getOrCreateHub(agentId: string, pluginCtx: any): { memoryHub: MemoryHub; knowledgeSystem: KnowledgeSystem } {
       let cached = hubCache.get(agentId);
       if (!cached) {
+        const dataDir = getDataDir(pluginCtx);
+        const ks = new KnowledgeSystem(agentId, dataDir);
+        ks.init().catch(err => console.error('[evo-cortex] KnowledgeSystem init error:', err));
         cached = {
           memoryHub: new MemoryHub(pluginCtx, config.memory, config.embedding, config.retention),
-          knowledgeGraph: new KnowledgeGraph(pluginCtx, config.knowledge)
+          knowledgeSystem: ks
         };
         hubCache.set(agentId, cached);
       }
@@ -1085,39 +1075,9 @@ const plugin = {
           }
 
           // --- 2. 不再在此记录对话，由 agent_end hook 负责（AI 回复后正确配对）---
+          // --- 2b. session scan 已移至 agent_end（message:received 专注读取增强）---
 
-          // --- 3. 按需 session 扫描（异步，不阻塞回复）---
-          try {
-            if (agentId && agentId !== 'main') {
-              const openclawRoot = path.join(process.env.HOME || '', '.openclaw');
-              const sessionsPath = path.join(openclawRoot, 'agents', agentId, 'sessions');
-              const dataDir = path.join(workspaceDir, 'data', agentId);
-              const prefFile = path.join(workspaceDir, 'memory', agentId, 'USER_PREFERENCES.md');
-              const hookLogger = getLogger({ component: 'session_scanner' });
-
-              scanNewSessions(agentId, dataDir, sessionsPath, prefFile, hookLogger)
-                .then(async r => {
-                  if (r.new_sessions > 0) {
-                    hookLogger.info(`scan: ${r.new_sessions} new, ${r.messages_written} msgs, ${r.preferences_extracted} prefs in ${r.duration_ms}ms`);
-                    // 自动增量更新索引（不阻塞对话）
-                    try {
-                      const memoryIndexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
-                      const builder = memoryIndexer.getIndexBuilder();
-                      const memoryDir = getMemoryStorageDir({ agentId, workspaceDir } as any);
-                      await builder.update([memoryDir]);
-                      hookLogger.info('incremental index update completed');
-                    } catch (err: any) {
-                      hookLogger.warn(`incremental index update failed: ${err.message}`);
-                    }
-                  }
-                })
-                .catch(err => hookLogger.error('scan failed', err));
-            }
-          } catch (err: any) {
-            logger.debug(`hook: session scan skipped: ${err.message}`);
-          }
-
-          // --- 4. 最近记忆摘要（MemoryHub 读取，~2ms，独立降级）---
+          // --- 3. 最近记忆摘要（MemoryHub 读取，~2ms，独立降级）---
           try {
             const { memoryHub } = getOrCreateHub(agentId, { agentId, workspaceDir } as any);
             const summary = await memoryHub.getRecentDailySummary(2);
@@ -1126,7 +1086,7 @@ const plugin = {
             logger.debug(`hook: recent summary skipped: ${err.message}`);
           }
 
-          // --- 4b. 元规则注入（自进化闭环：rules → 上下文增强）---
+          // --- 4. 元规则注入（自进化闭环：rules → 上下文增强）---
           try {
             const userContent = message?.context?.content || message?.content || message?.text || '';
             if (userContent && userContent.trim().length >= 4) {
@@ -1416,6 +1376,38 @@ const plugin = {
               sourceRef: agentId,
             }).catch((err: any) => logger.debug(`record failed: ${err.message}`));
             logger.info(`agent_end: recorded pair (user=${lastUserMsg.length > 0}, ai=${lastAiMsg.length > 0})`);
+
+            // 持久化到 memory/*.md + 索引 memory.db（异步，不阻塞回复）
+            try {
+              const hub = getOrCreateHub(agentId, { agentId, workspaceDir });
+              if (hub.memoryHub) {
+                const memEntry = {
+                  type: 'conversation' as const,
+                  content: pairContent,
+                  timestamp: new Date().toISOString(),
+                  agent: agentId,
+                  source: 'hook',
+                  sourceRef: agentId,
+                };
+                hub.memoryHub.persistToMarkdown(memEntry as any)
+                  .then(() => {
+                    logger.debug('persisted to memory/*.md');
+                    // 写完后触发 DB 索引更新（保证 .md 和 DB 都已更新）
+                    try {
+                      const memoryIndexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
+                      const builder = memoryIndexer.getIndexBuilder();
+                      builder.buildFromDb()
+                        .then(r => logger.info(`db index: ${r.dbRowsIndexed} rows, fts=${r.ftsCount}, vec=${r.vectorCount} in ${r.durationMs}ms`))
+                        .catch(err => logger.warn(`db index failed: ${err.message}`));
+                    } catch (err: any) {
+                      logger.debug(`db index trigger skipped: ${err.message}`);
+                    }
+                  })
+                  .catch(err => logger.debug(`persist failed: ${err.message}`));
+              }
+            } catch (err: any) {
+              logger.debug(`agent_end persist+index skipped: ${err.message}`);
+            }
           }
         } catch (err: any) {
           // silent
@@ -1479,9 +1471,8 @@ export { MemoryHub, MemoryConfig, MemorySearchResult, CleanupReport, Compression
 // memory_system 新系统（重命名避免冲突）
 export { MemorySystem } from './memory/memory_system';
 export type { MemoryEntry as MemorySystemEntry, SearchResult as MemorySearchResultV2, SearchQuery as MemorySearchQuery } from './memory/memory_system';
-// knowledge_graph 保留兼容层
-export { KnowledgeGraph, KnowledgeConfig } from './knowledge/knowledge_graph';
-export type { KnowledgeEntity as KnowledgeEntityV1, KnowledgeRelation as KnowledgeRelationV1, KnowledgeSearchResult } from './knowledge/knowledge_graph';
+// knowledge_graph 已迁移到 knowledge_system，类型通过 knowledge_system 导出
+export type { KnowledgeConfig, KnowledgeSearchResult } from './knowledge/knowledge_system';
 // knowledge_system 新系统
 export { KnowledgeSystem } from './knowledge/knowledge_system';
 export type { KnowledgeEntity as KnowledgeEntityV2, KnowledgeRelation as KnowledgeRelationV2, KnowledgeRule, SearchQuery as KnowledgeSearchQuery } from './knowledge/knowledge_system';
