@@ -808,6 +808,76 @@ const plugin = {
       };
     });
 
+    // 17. 知识衰减工具（cron 调用）
+    api.registerTool((ctx) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'decay_memory',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "decay_memory",
+        description: "对知识图谱中的实体和关系执行衰减更新（30天未提及的实体重要性 ×0.95，60天未使用的关系强度 ×0.9）",
+        parameters: Type.Object({}),
+        async execute(_id: string) {
+          try {
+            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            if (!ks) {
+              return { content: [{ type: "text" as const, text: "KnowledgeSystem not available" }] };
+            }
+            await ks.runDecayUpdates();
+            toolLogger.info('Decay updates completed');
+            const stats = await ks.getStats();
+            return { content: [{ type: "text" as const, text: JSON.stringify({
+              status: 'completed',
+              entities: stats.entities,
+              relations: stats.relations,
+              rules: stats.rules
+            }, null, 2) }] };
+          } catch (error: any) {
+            toolLogger.error('Decay failed', error);
+            return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
+    // 18. 规则验证工具（cron 调用）
+    api.registerTool((ctx) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'validate_rules',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "validate_rules",
+        description: "验证知识图谱中的规则：标记 confidence<0.4 为过时，confidence>0.8 为核心规则",
+        parameters: Type.Object({}),
+        async execute(_id: string) {
+          try {
+            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            if (!ks) {
+              return { content: [{ type: "text" as const, text: "KnowledgeSystem not available" }] };
+            }
+            const result = await ks.validateRules();
+            toolLogger.info(`Validated rules: ${result.stale} stale, ${result.core} core`);
+            return { content: [{ type: "text" as const, text: JSON.stringify({
+              status: 'completed',
+              stale_marked: result.stale,
+              core_marked: result.core
+            }, null, 2) }] };
+          } catch (error: any) {
+            toolLogger.error('Validation failed', error);
+            return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
     // ========== 实例缓存（避免每次 hook 都重建）==========
     const hubCache = new Map<string, { memoryHub: MemoryHub; knowledgeGraph: KnowledgeGraph }>();
 

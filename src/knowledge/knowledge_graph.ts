@@ -1,4 +1,9 @@
 /**
+ * ⚠️ DEPRECATED — 保留仅作向后兼容层。
+ * 新代码请使用 knowledge_system.ts（KnowledgeSystem 类）。
+ * 该文件被以下模块引用：health-check, session_scanner, config-validator, cli/commands, index.ts
+ * 迁移完成后删除此文件。
+ *
  * Knowledge Graph v2 - 知识图谱
  *
  * 功能：
