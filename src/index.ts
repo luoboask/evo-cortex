@@ -1064,8 +1064,8 @@ const plugin = {
       return triggers.some(t => lower.includes(t.toLowerCase()));
     }
 
-    api.on(
-      "message_received",
+    api.registerHook(
+      "message:received",
       async (message: any, hookCtx: any) => {
         try {
           const sessionKey = hookCtx?.sessionKey || '';
