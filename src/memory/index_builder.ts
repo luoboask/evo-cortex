@@ -257,14 +257,45 @@ export class IndexBuilder {
       }
 
       // 清理已删除的 WM 条目索引（WM 晋升后被删除，但索引可能残留）
+      // 修复：row.id 本身已含 wm_ 前缀，直接用 db_${oldWmId}
       const ltmConsolidatedFrom = ltmRows
         .filter((r: any) => r.consolidated_from)
         .map((r: any) => r.consolidated_from);
       for (const oldWmId of ltmConsolidatedFrom) {
-        const oldDocId = `db_wm_${oldWmId}`;
+        const oldDocId = `db_${oldWmId}`;
         await this.ftsIndex.remove(oldDocId);
         await this.vectorStore.remove(oldDocId);
         delete this.dbIndexState[oldWmId];
+      }
+
+      // 清理 dbIndexState 中已不存在的条目（TTL 删除、手动删除等）
+      // 注意：需要查询全部 DB ID（不是仅新行），否则会把正常已索引条目误判为 stale
+      const allDbIds = new Set<string>();
+      if (dbPath && fs.existsSync(dbPath)) {
+        const checkDb = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY);
+        const checkDbAll = (sql: string): Promise<string[]> =>
+          new Promise((resolve, reject) =>
+            checkDb.all(sql, [], (err: Error | null, rows: any[]) => err ? reject(err) : resolve(rows?.map((r: any) => r.id as string) || [])));
+        const [allWmIds, allLtmIds] = await Promise.all([
+          checkDbAll('SELECT id FROM working_memory'),
+          checkDbAll('SELECT id FROM long_term_memory'),
+        ]);
+        checkDb.close();
+        for (const id of allWmIds) allDbIds.add(id);
+        for (const id of allLtmIds) allDbIds.add(id);
+      }
+      let staleCleaned = 0;
+      for (const indexedId of Object.keys(this.dbIndexState)) {
+        if (allDbIds.size > 0 && !allDbIds.has(indexedId)) {
+          const staleDocId = `db_${indexedId}`;
+          await this.ftsIndex.remove(staleDocId);
+          await this.vectorStore.remove(staleDocId);
+          delete this.dbIndexState[indexedId];
+          staleCleaned++;
+        }
+      }
+      if (staleCleaned > 0) {
+        console.log(`[IndexBuilder] cleaned ${staleCleaned} stale index entries (deleted from DB)`);
       }
 
       result.durationMs = Date.now() - startTime;
