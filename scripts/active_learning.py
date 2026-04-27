@@ -61,6 +61,7 @@ def main():
 
     # 英文技术词
     en_words = re.findall(r'\b[A-Z][a-zA-Z]{3,}\b', all_text)
+    # 通用停用词 + Markdown 模板噪音词（来自 AGENTS.md/SOUL.md 等模板文本）
     stop_words = {'The', 'This', 'That', 'These', 'Those', 'What', 'When', 'Where',
                   'Which', 'Who', 'Why', 'How', 'Have', 'Has', 'Had', 'Will', 'Would',
                   'Could', 'Should', 'Can', 'May', 'Must', 'Shall', 'Need', 'From',
@@ -70,7 +71,17 @@ def main():
                   'Also', 'Some', 'Then', 'Than', 'They', 'Them', 'Their', 'There',
                   'Other', 'Another', 'Each', 'Every', 'Any', 'All', 'Both', 'Few',
                   'Many', 'Much', 'Such', 'Only', 'Own', 'Same', 'Well', 'Back',
-                  'Even', 'Still', 'Already', 'Always', 'Never', 'Often', 'Sometimes'}
+                  'Even', 'Still', 'Already', 'Always', 'Never', 'Often', 'Sometimes',
+                  # 模板噪音词（MD 文件结构词）
+                  'USER', 'BOOTSTRAP', 'IDENTITY', 'SOUL', 'MEMORY', 'TOOLS', 'AGENTS',
+                  'Name', 'Notes', 'Related', 'Update', 'Make', 'Agent',
+                  'Your', 'Workspace', 'Context', 'First', 'Session', 'Heartbeat',
+                  'Memory', 'System', 'Status', 'Red', 'Lines', 'External', 'Internal',
+                  'Skills', 'Voice', 'Platform', 'Make', 'Default', 'Default',
+                  'Skills', 'Keep', 'Local', 'What', 'Goes', 'Here', 'Like',
+                  'Cameras', 'Living', 'Front', 'TTS', 'Preferred', 'Speaker',
+                  'Why', 'Separate', 'Shared', 'Keeping', 'Apart', 'Means',
+                  'Infrastructure', 'Add', 'Whatever', 'Helps', 'Cheat', 'Sheet'}
     filtered = [(w, c) for w, c in Counter(en_words).most_common(30) if w not in stop_words]
 
     if filtered:

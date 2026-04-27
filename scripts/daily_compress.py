@@ -17,11 +17,12 @@ import sqlite3
 from datetime import datetime
 
 AGENT_ID = sys.argv[1] if len(sys.argv) > 1 else "cortex-test-agent"
-# 插件 workspace 根目录（脚本所在目录的上级）
-PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(PLUGIN_DIR, "data", AGENT_ID)
-MEMORY_DB = os.path.join(DATA_DIR, "memory.db")
-KNOWLEDGE_DB = os.path.join(DATA_DIR, "knowledge.db")
+# ✅ 使用 workspace 目录（不是插件目录）
+HOME = os.path.expanduser('~')
+WORKSPACE_DIR = os.path.join(HOME, '.openclaw', f'workspace-{AGENT_ID}')
+DATA_DIR = os.path.join(WORKSPACE_DIR, 'data', AGENT_ID)
+MEMORY_DB = os.path.join(DATA_DIR, 'memory.db')
+KNOWLEDGE_DB = os.path.join(DATA_DIR, 'knowledge.db')
 
 
 def ensure_dirs():
@@ -117,6 +118,13 @@ def validate_rules():
         return
 
     db = get_db(KNOWLEDGE_DB)
+    # 确保 status 列存在
+    cols = [r[1] for r in db.execute('PRAGMA table_info(rules)').fetchall()]
+    if 'status' not in cols:
+        db.execute('ALTER TABLE rules ADD COLUMN status TEXT DEFAULT \'active\'')
+        db.execute("UPDATE rules SET status='active' WHERE status IS NULL")
+        db.commit()
+
     # 标记低置信度规则为过时
     db.execute("""
         UPDATE rules SET status = 'stale'

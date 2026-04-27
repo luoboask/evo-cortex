@@ -14,6 +14,7 @@
 
 变更日志:
     2026-04-27: 数据源 cortex.db → memory.db；新增规则写回 knowledge.db
+    2026-04-27 v2: 增加数据清洗，过滤 session_scanner 垃圾数据
 """
 
 import sys
@@ -31,13 +32,35 @@ class Config:
         self.workspace = Path.home() / '.openclaw' / f'workspace-{agent_id}'
         self.data_dir = self.workspace / 'data' / agent_id
         self.evolution_dir = self.workspace / 'evolution' / agent_id
-        # ✅ 数据源统一：从 memory.db 读取（之前是 cortex.db）
         self.memory_db = self.data_dir / 'memory.db'
         self.knowledge_db = self.data_dir / 'knowledge.db'
-        
-        # 确保目录存在
         self.evolution_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
+
+
+def is_clean_content(content: str) -> bool:
+    """过滤垃圾数据：空内容、session_scanner 原始 JSON"""
+    if not content or not content.strip():
+        return False
+    # 过滤 session_scanner 导入的原始 JSON 格式 + 旧报告内容
+    junk_prefixes = [
+        '[user]: [{', '[assistant]: [{',
+        '[user]: [', '[assistant]: [',
+        '[user]: Sender', '[user]: {',
+        'Sender (untrusted metadata):',
+        '[Bootstrap pending]',
+        "⚠️ Context limit exceeded",
+        '```json',
+        'session_messages', 'working_memory', 'scan_log',
+        '# 👤 用户偏好设置',
+        '# 记忆数据分析报告',
+        '# 周统计报告', '# 周度摘要',
+        '# 2026-04-',
+    ]
+    for prefix in junk_prefixes:
+        if content.startswith(prefix):
+            return False
+    return True
 
 
 class EvolutionEventExtractor:
@@ -55,11 +78,6 @@ class EvolutionEventExtractor:
         self.config = config
     
     def extract_events(self, limit: int = 100, min_importance: float = 3.0) -> List[Dict]:
-        """从 memory.db 提取进化事件
-        
-        ✅ 同时读取 working_memory 和 long_term_memory
-        ✅ 直接使用 importance 列（不再需要手动计算）
-        """
         if not self.config.memory_db.exists():
             print(f"❌ 数据库不存在：{self.config.memory_db}")
             return []
@@ -69,8 +87,10 @@ class EvolutionEventExtractor:
         cur = conn.cursor()
         
         events = []
+        ltm_count = 0
+        wm_count = 0
         
-        # 1. 从 long_term_memory 提取（已经过 consolidate 筛选，质量更高）
+        # 1. 从 long_term_memory 提取（已筛选，质量最高）
         cur.execute('''
             SELECT id, type, title, content, importance, tags, source, source_ref, created_at
             FROM long_term_memory
@@ -81,34 +101,40 @@ class EvolutionEventExtractor:
         
         for row in cur.fetchall():
             entry = dict(row)
-            event = self._classify_event(entry)
-            if event:
-                events.append(event)
+            if is_clean_content(entry.get('content', '')):
+                event = self._classify_event(entry)
+                if event:
+                    events.append(event)
+                    ltm_count += 1
         
-        # 2. 如果 LTM 不够，从 working_memory 补充
+        # 2. WM 补充（过滤垃圾数据）
         remaining = limit - len(events)
         if remaining > 0:
             cur.execute('''
                 SELECT id, type, title, content, importance, tags, source, source_ref, created_at
                 FROM working_memory
                 WHERE importance >= ?
+                  AND content IS NOT NULL AND content != ''
                 ORDER BY importance DESC, created_at DESC
-                LIMIT ?
-            ''', (min_importance, remaining))
+            ''', (min_importance,))
             
             for row in cur.fetchall():
+                if len(events) >= limit:
+                    break
                 entry = dict(row)
+                # 过滤垃圾内容
+                if not is_clean_content(entry.get('content', '')):
+                    continue
                 event = self._classify_event(entry)
                 if event:
                     events.append(event)
+                    wm_count += 1
         
         conn.close()
-        print(f"   📊 LTM 贡献事件数: {min(len(events), limit - remaining)}")
-        print(f"   📊 WM 贡献事件数: {len(events) - min(len(events), limit - remaining)}")
+        print(f"   📊 有效数据: LTM {ltm_count} 条, WM {wm_count} 条")
         return events
     
     def _classify_event(self, entry: Dict) -> Optional[Dict]:
-        """分类事件类型"""
         content = entry.get('content', '')
         title = entry.get('title', '')
         combined = f"{title} {content}"
@@ -147,10 +173,8 @@ class PatternRecognizer:
         self.config = config
     
     def recognize_patterns(self, events: List[Dict]) -> List[Dict]:
-        """识别重复出现的模式"""
         type_counts = Counter(e['type'] for e in events)
         
-        # 提取标签
         tag_counts = Counter()
         for event in events:
             tags = event.get('tags', '')
@@ -163,7 +187,6 @@ class PatternRecognizer:
         
         patterns = []
         
-        # 高频事件类型（≥ 2 次）
         for event_type, count in type_counts.most_common(5):
             if count >= 2:
                 patterns.append({
@@ -173,7 +196,6 @@ class PatternRecognizer:
                     'suggestion': self._get_suggestion(event_type, count)
                 })
         
-        # 高频标签（≥ 2 次）
         for tag, count in tag_counts.most_common(5):
             if count >= 2 and tag:
                 patterns.append({
@@ -204,10 +226,8 @@ class MetaRuleGenerator:
         self.config = config
     
     def generate_rules(self, events: List[Dict], patterns: List[Dict]) -> List[Dict]:
-        """从事件和模式中提炼元规则"""
         rules = []
         
-        # 从高频问题生成规则
         problem_events = [e for e in events if e['type'] == 'problem']
         if len(problem_events) >= 2:
             rules.append({
@@ -220,7 +240,6 @@ class MetaRuleGenerator:
                 'evidence': [e['content'][:100] for e in problem_events[:2]]
             })
         
-        # 从成功经验生成规则
         breakthrough_events = [e for e in events if e['type'] == 'breakthrough']
         if len(breakthrough_events) >= 2:
             rules.append({
@@ -233,7 +252,6 @@ class MetaRuleGenerator:
                 'evidence': [e['content'][:100] for e in breakthrough_events[:2]]
             })
         
-        # 从模式生成规则
         for pattern in patterns:
             if pattern['pattern_type'] == 'recurring_event':
                 rules.append({
@@ -250,32 +268,32 @@ class MetaRuleGenerator:
 
 
 class RuleWriter:
-    """✅ 新增：元规则写回 knowledge.db（闭环关键步骤）"""
+    """元规则写回 knowledge.db（闭环关键步骤）"""
     
     def __init__(self, config: Config):
         self.config = config
     
     def write_rules(self, rules: List[Dict]) -> Dict:
-        """将生成的元规则写回 knowledge.db 的 rules 表
-        
-        如果同 title 的规则已存在，更新置信度（取最大值）
-        """
         if not self.config.knowledge_db.exists():
             print(f"   ⚠️ knowledge.db 不存在，跳过规则写回")
             return {'inserted': 0, 'updated': 0, 'skipped': 0}
         
         conn = sqlite3.connect(self.config.knowledge_db)
         cur = conn.cursor()
-        
+        # 自修复：确保 rules 表存在
+        cur.execute('''CREATE TABLE IF NOT EXISTS rules (
+            id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL,
+            condition TEXT, action TEXT, confidence REAL DEFAULT 0.5,
+            support_count INTEGER DEFAULT 0,
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')))''')
         stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
         
         for rule in rules:
-            # 检查是否已有同名规则
             cur.execute('SELECT id, confidence FROM rules WHERE title = ?', (rule['title'],))
             existing = cur.fetchone()
             
             if existing:
-                # 更新：取更高的置信度
                 new_conf = max(existing[1], rule['confidence'])
                 cur.execute('''
                     UPDATE rules 
@@ -286,7 +304,6 @@ class RuleWriter:
                 stats['updated'] += 1
                 print(f"   🔄 更新规则: {rule['title']} (置信度 {existing[1]:.0%} → {new_conf:.0%})")
             else:
-                # 插入新规则
                 rule_id = f"rule_{uuid.uuid4().hex[:8]}"
                 cur.execute('''
                     INSERT INTO rules (id, type, title, condition, action, confidence, created_at)
@@ -307,7 +324,6 @@ class SelfImprovementAdvisor:
         self.config = config
     
     def generate_advice(self, events: List[Dict], patterns: List[Dict], rules: List[Dict]) -> List[Dict]:
-        """基于进化数据生成自我改进建议"""
         advice_list = []
         
         problem_events = [e for e in events if e['type'] == 'problem']
@@ -361,7 +377,6 @@ class EvolutionReporter:
     
     def generate_report(self, events: List[Dict], patterns: List[Dict], rules: List[Dict],
                        rule_stats: Optional[Dict] = None):
-        """生成完整的进化报告"""
         timestamp = datetime.now().strftime('%Y-%m-%d_%H%M%S')
         report_file = self.config.evolution_dir / f'evolution-report-{timestamp}.md'
         
@@ -374,16 +389,14 @@ class EvolutionReporter:
             f.write(f"**Agent**: {self.config.agent_id}\n")
             f.write(f"**数据源**: memory.db (working_memory + long_term_memory)\n\n")
             
-            # 规则写回状态
             if rule_stats:
                 f.write(f"**规则写回**: ➕ {rule_stats['inserted']} 新增, ")
                 f.write(f"🔄 {rule_stats['updated']} 更新, ")
                 f.write(f"⏭️ {rule_stats['skipped']} 跳过\n\n")
                 f.write("---\n\n")
             
-            # 进化事件摘要
             f.write("## 📌 进化事件摘要\n\n")
-            f.write(f"共提取 **{len(events)}** 个高价值事件\n\n")
+            f.write(f"共提取 **{len(events)}** 个高价值事件（已过滤垃圾数据）\n\n")
             
             by_type = Counter(e['type'] for e in events)
             for event_type, count in by_type.most_common():
@@ -392,7 +405,6 @@ class EvolutionReporter:
                 f.write(f"- {emoji} **{event_type}**: {count} 个\n")
             f.write("\n---\n\n")
             
-            # 识别的模式
             f.write("## 🔍 识别的模式\n\n")
             if patterns:
                 for i, pattern in enumerate(patterns, 1):
@@ -402,7 +414,6 @@ class EvolutionReporter:
                 f.write("暂无明显模式（数据量不足）\n\n")
             f.write("---\n\n")
             
-            # 生成的元规则
             f.write("## 📜 生成的元规则\n\n")
             if rules:
                 for rule in rules:
@@ -419,7 +430,6 @@ class EvolutionReporter:
                 f.write("暂无元规则生成（需要更多高质量事件）\n\n")
             f.write("---\n\n")
             
-            # 自我改进建议
             f.write("## 💡 自我改进建议\n\n")
             if advice_list:
                 for i, advice in enumerate(advice_list, 1):
@@ -430,10 +440,11 @@ class EvolutionReporter:
                     f.write(f"   - 🏷️ 类别：{advice['category']}\n\n")
             else:
                 f.write("暂无具体建议（需要积累更多数据）\n\n")
+        
+        return report_file
 
 
 def main():
-    """主函数"""
     if len(sys.argv) < 2:
         print("用法：python3 activate-evolution.py <agent-id>")
         sys.exit(1)
@@ -444,51 +455,45 @@ def main():
     print("╔══════════════════════════════════════════════╗")
     print("║  🧬 Evo-Cortex 自进化能力激活                ║")
     print("║  数据源: memory.db | 闭环: knowledge.db      ║")
+    print("║  数据清洗: 过滤 session_scanner 垃圾          ║")
     print("╚══════════════════════════════════════════════╝")
     print()
     
-    # 1. 提取进化事件
-    print("📌 步骤 1: 提取进化事件（从 memory.db）...")
+    print("📌 步骤 1: 提取进化事件（过滤垃圾数据）...")
     extractor = EvolutionEventExtractor(config)
     events = extractor.extract_events(limit=100)
     print(f"   ✅ 提取到 {len(events)} 个高价值事件")
     
     if not events:
-        print("⚠️  未找到足够的高价值事件（需要 importance >= 3.0）")
-        print("   提示：先进行一些对话积累数据")
+        print("⚠️  未找到足够的高价值事件")
+        print("   提示：新 hook 生效后，对话会自动产生高质量数据")
         sys.exit(0)
     
-    # 2. 识别模式
     print("\n🔍 步骤 2: 识别模式...")
     recognizer = PatternRecognizer(config)
     patterns = recognizer.recognize_patterns(events)
     print(f"   ✅ 识别到 {len(patterns)} 个模式")
     
-    # 3. 生成元规则
     print("\n📜 步骤 3: 生成元规则...")
     generator = MetaRuleGenerator(config)
     rules = generator.generate_rules(events, patterns)
     print(f"   ✅ 生成 {len(rules)} 条元规则")
     
-    # ✅ 4. 写回 knowledge.db（新增闭环步骤）
     print("\n🔗 步骤 4: 写回知识图谱（knowledge.db）...")
     rule_writer = RuleWriter(config)
     rule_stats = rule_writer.write_rules(rules)
     print(f"   ✅ 规则写回: ➕{rule_stats['inserted']} 🔄{rule_stats['updated']} ⏭️{rule_stats['skipped']}")
     
-    # 5. 生成自我改进建议
     print("\n💡 步骤 5: 生成自我改进建议...")
     advisor = SelfImprovementAdvisor(config)
     advice_list = advisor.generate_advice(events, patterns, rules)
     print(f"   ✅ 生成 {len(advice_list)} 条建议")
     
-    # 6. 生成报告
     print("\n📄 步骤 6: 生成进化报告...")
     reporter = EvolutionReporter(config)
     report_file = reporter.generate_report(events, patterns, rules, rule_stats)
     print(f"   ✅ 报告已保存：{report_file}")
     
-    # 摘要
     print("\n" + "="*50)
     print("📊 进化摘要:")
     print("="*50)

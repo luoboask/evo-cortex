@@ -1068,7 +1068,7 @@ const plugin = {
       "message:received",
       async (message: any, hookCtx: any) => {
         try {
-          const sessionKey = hookCtx?.sessionKey || '';
+          const sessionKey = message?.sessionKey || hookCtx?.sessionKey || '';
           const parts = sessionKey.split(':');
           const agentId = parts.length >= 2 ? parts[1] : 'main';
           const workspaceDir = path.join(process.env.HOME || '', '.openclaw', `workspace-${agentId}`);
@@ -1086,9 +1086,7 @@ const plugin = {
 
           // --- 2. 写入工作记忆（异步 fire-and-forget，不阻塞）---
           try {
-            // DEBUG: 打印完整 message 结构
-            logger.info(`[DEBUG message:received] keys=${Object.keys(message || {}).join(',')} content_type=${typeof message?.content} content_preview=${typeof message?.content === 'string' ? message.content.substring(0, 100) : JSON.stringify(message?.content).substring(0, 100)}`);
-            const userContent = message?.content || message?.text || '';
+            const userContent = message?.context?.content || message?.content || message?.text || '';
             if (userContent && isRealConversation(userContent)) {
               const ms = getOrCreateMS(agentId, workspaceDir);
               if (ms) {
@@ -1097,7 +1095,7 @@ const plugin = {
                   content: `User: ${userContent}`,
                   source: 'hook',
                   sourceRef: agentId,
-                }).catch(() => {}); // 异步写入，不阻塞
+                }).catch((err: any) => logger.debug(`hook: record failed: ${err.message}`));
               }
             }
           } catch (err: any) {
@@ -1146,7 +1144,7 @@ const plugin = {
 
           // --- 4b. 元规则注入（自进化闭环：rules → 上下文增强）---
           try {
-            const userContent = message?.content || message?.text || '';
+            const userContent = message?.context?.content || message?.content || message?.text || '';
             if (userContent && userContent.trim().length >= 4) {
               const dataDirPath = path.join(workspaceDir, 'data', agentId);
               const kgDbPath = path.join(dataDirPath, 'knowledge.db');
@@ -1186,7 +1184,7 @@ const plugin = {
 
           // --- 5. 语义检索增强（共享超时保护 + 独立降级）---
           try {
-            const userContent = message?.content || message?.text || '';
+            const userContent = message?.context?.content || message?.content || message?.text || '';
             if (shouldEnhanceMessage(userContent)) {
               const searchDeadline = Date.now() + 2000; // 总预算 2s，记忆+知识共享
 
