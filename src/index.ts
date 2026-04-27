@@ -1064,8 +1064,8 @@ const plugin = {
       return triggers.some(t => lower.includes(t.toLowerCase()));
     }
 
-    api.registerHook(
-      "message:received",
+    api.on(
+      "message_received",
       async (message: any, hookCtx: any) => {
         try {
           const sessionKey = message?.sessionKey || hookCtx?.sessionKey || '';
@@ -1084,23 +1084,7 @@ const plugin = {
             logger.debug(`hook: pref injection skipped: ${err.message}`);
           }
 
-          // --- 2. 写入工作记忆（异步 fire-and-forget，不阻塞）---
-          try {
-            const userContent = message?.context?.content || message?.content || message?.text || '';
-            if (userContent && isRealConversation(userContent)) {
-              const ms = getOrCreateMS(agentId, workspaceDir);
-              if (ms) {
-                ms.record({
-                  type: 'conversation',
-                  content: `User: ${userContent}`,
-                  source: 'hook',
-                  sourceRef: agentId,
-                }).catch((err: any) => logger.debug(`hook: record failed: ${err.message}`));
-              }
-            }
-          } catch (err: any) {
-            logger.debug(`hook: memory record skipped: ${err.message}`);
-          }
+          // --- 2. 不再在此记录对话，由 agent_end hook 负责（AI 回复后正确配对）---
 
           // --- 3. 按需 session 扫描（异步，不阻塞回复）---
           try {
@@ -1262,22 +1246,185 @@ const plugin = {
           logger.error('message_received hook failed', error);
           return {};
         }
-      },
-      {
-        name: "evo-cortex-light-received",
-        description: "Inject user preferences, recent memory summary, and semantic search results (lightweight)",
-        entry: {
-          hook: {
-            name: "evo-cortex-light-received",
-            description: "Inject user preferences, recent memory summary, and semantic search results (lightweight)"
-          }
-        }
       }
     );
 
-    // 2. message:sent — 已禁用（按用户需求，不影响对话）
+    // 2. message_sent — 记录完整对话对（用户消息 + AI 回复）
+    api.on(
+      "message_sent",
+      async (event: any, ctx: any) => {
+        // DEBUG: 写文件确认 hook 是否被调用
+        try { fs.appendFileSync('/tmp/evo-debug-sending.log', `${new Date().toISOString()} HOOK FIRED | eventKeys=${Object.keys(event||{}).join(',')} | content=${(event?.content||'').substring(0,80)} | ctxKeys=${Object.keys(ctx||{}).join(',')} | sessionKey=${ctx?.sessionKey||'(none)'}\n`); } catch {}
+        try {
+          const sessionKey = event?.sessionKey || ctx?.sessionKey || '';
+          const parts = sessionKey.split(':');
+          const agentId = parts.length >= 2 ? parts[1] : 'main';
+          const workspaceDir = path.join(process.env.HOME || '', '.openclaw', `workspace-${agentId}`);
+          const logger = getLogger({ component: 'message_sent', agentId });
 
-    // 3. before:tool_call hook — 工具调用前安全检查
+          // 提取 AI 回复内容（outbound message）
+          const aiContent = event?.content || event?.message?.content || '';
+          if (!aiContent || aiContent.trim().length < 2) {
+            return;
+          }
+
+          // 跳过系统消息、工具调用结果等噪音
+          if (aiContent.startsWith('System (') || aiContent.startsWith('[openclaw]') || aiContent.includes('missing tool result')) {
+            return;
+          }
+
+          // 从 session 文件中提取最近的用户消息（找最后一条 user role）
+          let userMessage = '';
+          try {
+            const sessionsPath = path.join(process.env.HOME || '', '.openclaw', 'agents', agentId, 'sessions');
+            if (fs.existsSync(sessionsPath)) {
+              const files = fs.readdirSync(sessionsPath)
+                .filter((f: string) => f.endsWith('.jsonl') && !f.includes('trajectory'))
+                .map((f: string) => ({
+                  name: f,
+                  mtime: fs.statSync(path.join(sessionsPath, f)).mtimeMs
+                }))
+                .sort((a: any, b: any) => b.mtime - a.mtime);
+
+              if (files.length > 0) {
+                const latestPath = path.join(sessionsPath, files[0].name);
+                const content = fs.readFileSync(latestPath, 'utf-8');
+                const lines = content.split('\n').filter(l => l.trim());
+                // 从后往前找最后一条 user 消息
+                for (let i = lines.length - 1; i >= Math.max(0, lines.length - 20); i--) {
+                  try {
+                    const d = JSON.parse(lines[i]);
+                    const msg = d.message || d;
+                    if (msg.role === 'user') {
+                      let content2 = msg.content || '';
+                      if (Array.isArray(content2)) {
+                        content2 = content2
+                          .filter((t: any) => t.type === 'text')
+                          .map((t: any) => t.text)
+                          .join(' ');
+                      }
+                      userMessage = content2;
+                      break;
+                    }
+                  } catch { /* skip */ }
+                }
+              }
+            }
+          } catch (err: any) {
+            logger.debug(`failed to read session: ${err.message}`);
+          }
+
+          // 记录完整对话对
+          if (userMessage || aiContent) {
+            const ms = getOrCreateMS(agentId, workspaceDir);
+            if (ms) {
+              const pairContent = userMessage
+                ? `User: ${userMessage}\n\nAI: ${aiContent}`
+                : `AI: ${aiContent}`;
+              ms.record({
+                type: 'conversation',
+                content: pairContent,
+                source: 'hook',
+                sourceRef: agentId,
+              }).catch((err: any) => logger.debug(`record failed: ${err.message}`));
+              logger.info(`recorded conversation pair (userLen=${userMessage.length}, aiLen=${aiContent.length})`);
+            }
+          }
+        } catch (err: any) {
+          // silent
+        }
+      },
+      { priority: 50 }
+    );
+
+    // 3. agent_end — AI 回复完成后记录完整对话对（用户问 → AI 答）
+    // 需要 allowConversationAccess: true（已在 openclaw.json 配置）
+    api.on(
+      "agent_end",
+      async (event: any, ctx: any) => {
+        try {
+          const sessionKey = ctx?.sessionKey || '';
+          const parts = sessionKey.split(':');
+          const agentId = parts.length >= 2 ? parts[1] : 'main';
+          if (!agentId || agentId === 'main') return;
+
+          const workspaceDir = path.join(process.env.HOME || '', '.openclaw', `workspace-${agentId}`);
+          const logger = getLogger({ component: 'agent_end', agentId });
+
+          // 从 event.messages 中提取最后一条用户消息和 AI 回复
+          const messages = event?.messages || [];
+          let lastUserMsg = '';
+          let lastAiMsg = '';
+
+          // 清洗用户消息：去掉 TUI metadata 头和 code fence，只保留纯文本内容
+          const cleanContent = (raw: string): string => {
+            const lines = raw.split('\n');
+            let inCodeFence = false;
+            let foundTimestamp = false;
+            let messageParts: string[] = [];
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (trimmed.startsWith('```')) { inCodeFence = !inCodeFence; continue; }
+              if (inCodeFence) continue;
+              if (trimmed.startsWith('Sender')) continue;
+              if (trimmed.startsWith('{') || trimmed.startsWith('"') || trimmed.startsWith('}') || trimmed.endsWith(',')) continue;
+              if (/^\[\w+\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(trimmed)) {
+                foundTimestamp = true;
+                const msg = trimmed.replace(/^\[\w+\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]*\]\s*/, '');
+                if (msg) messageParts.push(msg);
+                continue;
+              }
+              if (foundTimestamp) messageParts.push(trimmed);
+            }
+            const cleaned = messageParts.join(' ').trim();
+            return cleaned || raw;
+          };
+
+          // 从后往前找最后一条 user 和最后一条 assistant 消息
+          for (let i = messages.length - 1; i >= 0; i--) {
+            const msg = messages[i];
+            const role = msg?.role;
+            let content = msg?.content || '';
+            if (Array.isArray(content)) {
+              content = content
+                .filter((t: any) => t.type === 'text')
+                .map((t: any) => t.text)
+                .join(' ');
+            }
+            if (role === 'assistant' && !lastAiMsg && content && content.length > 5) {
+              lastAiMsg = content;
+            }
+            if (role === 'user' && !lastUserMsg && content && content.length > 2) {
+              lastUserMsg = cleanContent(content);
+            }
+            if (lastUserMsg && lastAiMsg) break;
+          }
+
+          if (!lastAiMsg && !lastUserMsg) return;
+
+          const ms = getOrCreateMS(agentId, workspaceDir);
+          if (ms) {
+            const pairContent = lastUserMsg && lastAiMsg
+              ? `User: ${lastUserMsg}\n\nAI: ${lastAiMsg}`
+              : lastUserMsg
+                ? `User: ${lastUserMsg}`
+                : `AI: ${lastAiMsg}`;
+            ms.record({
+              type: 'conversation',
+              content: pairContent,
+              source: 'hook',
+              sourceRef: agentId,
+            }).catch((err: any) => logger.debug(`record failed: ${err.message}`));
+            logger.info(`agent_end: recorded pair (user=${lastUserMsg.length > 0}, ai=${lastAiMsg.length > 0})`);
+          }
+        } catch (err: any) {
+          // silent
+        }
+      },
+      { priority: 50 }
+    );
+
+    // 4. before:tool_call hook — 工具调用前安全检查
     api.registerHook(
       "before:tool_call",
       async (toolCall: any) => {

@@ -45,17 +45,17 @@ def consolidate():
     # 标记过期（24 小时前的条目）
     db.execute("""
         UPDATE working_memory 
-        SET expires_at = datetime('now', '-1 second')
+        SET expires_at = strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', '-1 second'))
         WHERE expires_at IS NULL 
           AND created_at < datetime('now', '-24 hours')
-          AND importance >= 7.0
+          AND importance >= 5.0
     """)
     db.commit()
 
     # 晋升
     rows = db.execute("""
         SELECT * FROM working_memory 
-        WHERE expires_at < datetime('now') AND importance >= 7.0
+        WHERE REPLACE(REPLACE(expires_at, 'T', ' '), 'Z', '') < datetime('now') AND importance >= 5.0
     """).fetchall()
 
     promoted = 0
