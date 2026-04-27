@@ -105,8 +105,10 @@ def is_clean_content(content: str) -> bool:
 
 
 def extract_entities(text: str) -> list[str]:
-    """提取候选实体（严格噪音过滤）"""
+    """提取候选实体（严格噪音过滤 + 质量门槛）"""
     entities = set()
+
+    # 1. 技术术语模式（英文）
     for pattern in TECH_PATTERNS:
         for m in re.findall(pattern, text):
             if isinstance(m, str) and len(m) >= 3 and m not in ENTITY_NOISE:
@@ -114,9 +116,24 @@ def extract_entities(text: str) -> list[str]:
     for w in re.findall(r'\b[A-Z][a-zA-Z]{3,}\b', text):
         if w not in ENTITY_NOISE:
             entities.add(w)
-    for w in re.findall(r'[\u4e00-\u9fff]{2,4}', text):
-        if w not in ENTITY_NOISE_CN:
-            entities.add(w)
+
+    # 2. 中文实体提取——只保留已知技术概念和复合词，不提取碎片词
+    #    使用白名单模式：[修饰词]+[核心词] 结构（如"知识图谱"、"语义搜索"）
+    #    排除：代词碎片（"的模块"、"只有"）、副词（"所有"、"已完全打"）
+    cn_tech_patterns = [
+        # 技术复合词（4+ 字，非碎片）
+        r'[\u4e00-\u9fff]{4,6}',
+        # 已知技术概念前缀 + 核心词
+        r'(?:语义|向量|索引|数据库|消息|会话|插件|管道|记忆|实体|关系|规则|知识|进化|压缩|扫描|嵌入|融合|架构|配置|调度|部署|集群|容器|服务|网关|代理|路由|缓存|队列|触发|监听|回调|同步|异步|并发|线程|进程|守护|自动|手动|持久|临时|备份|恢复|迁移|转换|解析|编译|构建|测试|调试|日志|监控|告警|指标|统计|分析|预测|分类|聚类|推荐|搜索|过滤|排序|去重|合并|拆分|压缩|加密|解密|认证|授权|权限|审计|追踪|调试)[\u4e00-\u9fff]{2,4}',
+    ]
+    for pattern in cn_tech_patterns:
+        for w in re.findall(pattern, text):
+            if len(w) >= 4 and w not in ENTITY_NOISE_CN and w not in ENTITY_NOISE:
+                # 排除明显的碎片词：以"的"、"了"、"在"、"是"开头或结尾
+                if w[0] not in ('的', '了', '在', '是', '有', '就', '都', '也', '只', '已', '所'):
+                    if w[-1] not in ('的', '了', '着', '过', '吗', '呢', '吧'):
+                        entities.add(w)
+
     return list(entities)
 
 
