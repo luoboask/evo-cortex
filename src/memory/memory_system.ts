@@ -475,18 +475,26 @@ export class MemorySystem {
 
     const typeParams = query.types || [];
 
-    // 使用 LIKE 进行关键词搜索
-    const searchTerm = `%${query.text}%`;
+    // 将搜索词拆分为多个 LIKE 条件（AND 连接）
+    const terms = query.text.trim().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return [];
+
+    // 构建 content/title 多词 LIKE 条件：(content LIKE '%word1%' AND content LIKE '%word2%' ...) OR (title LIKE ...)
+    const contentLikes = terms.map(t => `content LIKE ?`).join(' AND ');
+    const titleLikes = terms.map(t => `title LIKE ?`).join(' AND ');
+    const likeClause = `(${contentLikes} OR ${titleLikes})`;
+
+    const params = [...typeParams, ...terms.map(t => `%${t}%`), ...terms.map(t => `%${t}%`), limit * 2];
 
     return new Promise<SearchResult[]>((resolve, reject) => {
       this.db.all(
         `SELECT id, type, title, content, importance, recall_count, created_at
          FROM long_term_memory
          WHERE importance >= ? ${typeFilter}
-           AND (content LIKE ? OR title LIKE ?)
+           AND ${likeClause}
          ORDER BY importance DESC, recall_count DESC, created_at DESC
          LIMIT ?`,
-        [minImportance, ...typeParams, searchTerm, searchTerm, limit * 2],
+        [minImportance, ...params],
         (err: Error | null, rows: any[]) => {
           if (err) {
             console.warn(`[MemorySystem] searchLTM failed: ${err.message}`);
@@ -510,16 +518,24 @@ export class MemorySystem {
 
   /** 搜索工作记忆 */
   private async searchWM(query: SearchQuery, limit: number): Promise<SearchResult[]> {
-    const searchTerm = `%${query.text}%`;
+    // 将搜索词拆分为多个 LIKE 条件（AND 连接）
+    const terms = query.text.trim().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return [];
+
+    const contentLikes = terms.map(t => `content LIKE ?`).join(' AND ');
+    const titleLikes = terms.map(t => `title LIKE ?`).join(' AND ');
+    const likeClause = `(${contentLikes} OR ${titleLikes})`;
+
+    const params = [...terms.map(t => `%${t}%`), ...terms.map(t => `%${t}%`), limit];
 
     return new Promise<SearchResult[]>((resolve, reject) => {
       this.db.all(
         `SELECT id, type, title, content, importance, created_at
          FROM working_memory
-         WHERE (content LIKE ? OR title LIKE ?)
+         WHERE ${likeClause}
          ORDER BY importance DESC, created_at DESC
          LIMIT ?`,
-        [searchTerm, searchTerm, limit],
+        [...params],
         (err: Error | null, rows: any[]) => {
           if (err) {
             console.warn(`[MemorySystem] searchWM failed: ${err.message}`);
