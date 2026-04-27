@@ -78,11 +78,15 @@ const ENTITY_TYPE_KEYWORDS: Record<string, RegExp[]> = {
     /\b(React|Vue|Angular|Node\.?js|TypeScript|JavaScript|Python|Go|Rust|Java|Kotlin|Swift)\b/,
     /\b(Docker|Kubernetes|AWS|GCP|Azure|Vercel|Netlify)\b/,
     /\b(REST|GraphQL|gRPC|WebSocket|HTTP\/2)\b/,
-    /\b(PostgreSQL|MySQL|Redis|MongoDB|SQLite|Elasticsearch)\b/,
+    /\b(PostgreSQL|MySQL|Redis|MongoDB|SQLite|Elasticsearch|SQLite3)\b/,
+    // 数据库/搜索相关：FTS5、B-tree、WAL 等
+    /\b(FTS[0-9]?|Full-Text Search|B-tree|WAL|rowid)\b/,
   ],
   concept: [
     /\b(架构|设计模式|最佳实践|重构|测试|部署|CI\/CD|DevOps)\b/,
     /\b(microservice|monolith|serverless|edge computing)\b/,
+    // 通用技术概念：隔离、融合、晋升、衰减等中文术语（2+ 字技术词）
+    /\b(隔离|融合|晋升|衰减|向量|嵌入|索引|缓存|单例|并发|原子|事务)\b/,
   ],
   person: [
     /\b([A-Z][a-z]+ [A-Z][a-z]+)\b/, // 英文人名
@@ -90,6 +94,12 @@ const ENTITY_TYPE_KEYWORDS: Record<string, RegExp[]> = {
   tool: [
     /\b(vscode|vim|git|npm|yarn|pnpm|webpack|vite|esbuild)\b/,
     /\b(OpenClaw|evo-cortex|lossless-claw)\b/,
+    // 代码级驼峰标识符：首字母小写，中间至少一个大写，总长 >= 8
+    /\b[a-z]+[A-Z][a-zA-Z]{2,}\b/g,
+  ],
+  config: [
+    // 配置键/环境变量/标志位：memorySearchConfig、timeoutSeconds 等（驼峰+长度>=8）
+    /\b[a-z]+[A-Z][a-zA-Z]{2,}(?:Config|Seconds|Timeout|Provider|Builder|Scanner|System|Index|Manager)\b/g,
   ],
 };
 

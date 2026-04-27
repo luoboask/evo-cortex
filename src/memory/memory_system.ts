@@ -475,16 +475,17 @@ export class MemorySystem {
 
     const typeParams = query.types || [];
 
-    // 将搜索词拆分为多个 LIKE 条件（AND 连接）
+    // 将搜索词拆分为多个 LIKE 条件（OR 连接，任一命中即可）
     const terms = query.text.trim().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
 
-    // 构建 content/title 多词 LIKE 条件：(content LIKE '%word1%' AND content LIKE '%word2%' ...) OR (title LIKE ...)
-    const contentLikes = terms.map(t => `content LIKE ?`).join(' AND ');
-    const titleLikes = terms.map(t => `title LIKE ?`).join(' AND ');
+    // (content LIKE '%a%' OR content LIKE '%b%' OR title LIKE '%a%' OR title LIKE '%b%')
+    const contentLikes = terms.map(t => `content LIKE ?`).join(' OR ');
+    const titleLikes = terms.map(t => `title LIKE ?`).join(' OR ');
     const likeClause = `(${contentLikes} OR ${titleLikes})`;
 
-    const params = [...typeParams, ...terms.map(t => `%${t}%`), ...terms.map(t => `%${t}%`), limit * 2];
+    const likeParams = [...terms.map(t => `%${t}%`), ...terms.map(t => `%${t}%`)]; // content terms + title terms
+    const params = [...typeParams, ...likeParams, limit * 2];
 
     return new Promise<SearchResult[]>((resolve, reject) => {
       this.db.all(
@@ -518,15 +519,15 @@ export class MemorySystem {
 
   /** 搜索工作记忆 */
   private async searchWM(query: SearchQuery, limit: number): Promise<SearchResult[]> {
-    // 将搜索词拆分为多个 LIKE 条件（AND 连接）
+    // 将搜索词拆分为多个 LIKE 条件（OR 连接，任一命中即可）
     const terms = query.text.trim().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
 
-    const contentLikes = terms.map(t => `content LIKE ?`).join(' AND ');
-    const titleLikes = terms.map(t => `title LIKE ?`).join(' AND ');
+    const contentLikes = terms.map(t => `content LIKE ?`).join(' OR ');
+    const titleLikes = terms.map(t => `title LIKE ?`).join(' OR ');
     const likeClause = `(${contentLikes} OR ${titleLikes})`;
 
-    const params = [...terms.map(t => `%${t}%`), ...terms.map(t => `%${t}%`), limit];
+    const params = [...terms.map(t => `%${t}%`), ...terms.map(t => `%${t}%`), limit]; // content terms + title terms + limit
 
     return new Promise<SearchResult[]>((resolve, reject) => {
       this.db.all(
