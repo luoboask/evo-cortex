@@ -94,10 +94,10 @@ export class MemorySystem {
   private storageDir: string;               // markdown 持久备份目录
   private backupEnabled: boolean = true;    // 是否启用 markdown 备份
 
-  constructor(agentId: string, dataDir: string) {
+  constructor(agentId: string, dataDir: string, workspaceDir: string) {
     this.dbPath = path.join(dataDir, agentId, 'memory.db');
     // Markdown 持久备份目录：workspace/memory/
-    this.storageDir = path.join(dataDir, '..', '..', '..', 'memory');
+    this.storageDir = path.join(workspaceDir, 'memory');
   }
 
   /** 初始化数据库（确保表、索引存在，支持从零启动） */
@@ -727,7 +727,8 @@ export class MemorySystem {
         `SELECT id, type, title, content, importance, source, created_at
          FROM long_term_memory
          WHERE date(created_at) >= date(?)
-         ORDER BY importance DESC, created_at DESC`,
+         ORDER BY importance DESC, created_at DESC
+         LIMIT 50`,
         [cutoffStr],
         (_err: Error | null, rows: any[]) => resolve(rows || [])
       );
@@ -789,16 +790,21 @@ export class MemorySystem {
   cleanupWorkingMemory(): { deleted: number } {
     if (!this.initialized || !this.db) return { deleted: 0 };
 
-    // 删除已过期的工作记忆（但保护最新 100 条未过期的）
-    this.db.exec(`
-      DELETE FROM working_memory
-      WHERE expires_at < datetime('now')
-        AND id NOT IN (
-          SELECT id FROM working_memory
-          WHERE expires_at >= datetime('now')
-          ORDER BY created_at DESC LIMIT 100
-        )
-    `);
+    try {
+      // 删除已过期的工作记忆（但保护最新 100 条未过期的）
+      this.db.exec(`
+        DELETE FROM working_memory
+        WHERE expires_at < datetime('now')
+          AND id NOT IN (
+            SELECT id FROM working_memory
+            WHERE expires_at >= datetime('now')
+            ORDER BY created_at DESC LIMIT 100
+          )
+      `);
+    } catch (err: any) {
+      console.warn(`[MemorySystem] cleanupWorkingMemory failed: ${err.message}`);
+      return { deleted: 0 };
+    }
 
     const deleted = this.db.changes;
     return { deleted };

@@ -224,7 +224,7 @@ export class SessionScanner {
           if (entryType === 'conversation') {
             const prefs = this.extractPreferences(m.content);
             for (const pref of prefs) {
-              this.savePreference(pref);
+              this.savePreference(pref, db);
             }
           }
 
@@ -297,12 +297,14 @@ export class SessionScanner {
     const MAX_CONTENT_LENGTH = 3000;
     const merged: Array<{ content: string; timestamp: string; originalCount: number; type: string }> = [];
     let current = entries[0];
+    let currentCount = 1;
 
     for (let i = 1; i < entries.length; i++) {
       const next = entries[i];
       const combined = current.content + '\n\n' + next.content;
 
       if (combined.length <= MAX_CONTENT_LENGTH) {
+        currentCount++;
         current = {
           ...current,
           content: combined,
@@ -313,10 +315,11 @@ export class SessionScanner {
         merged.push({
           content: current.content.slice(0, MAX_CONTENT_LENGTH),
           timestamp: current.created_at,
-          originalCount: 1,
+          originalCount: currentCount,
           type: current.type
         });
         current = next;
+        currentCount = 1;
       }
     }
 
@@ -324,7 +327,7 @@ export class SessionScanner {
     merged.push({
       content: current.content.slice(0, MAX_CONTENT_LENGTH),
       timestamp: current.created_at,
-      originalCount: 1,
+      originalCount: currentCount,
       type: current.type
     });
 
@@ -508,12 +511,16 @@ export class SessionScanner {
 
   /**
    * 保存偏好到 SQLite
+   * 若传入 db 参数则复用已有连接，否则自行打开/关闭
    */
-  private savePreference(pref: { category: string; key: string; value: string; confidence: number }): void {
+  private savePreference(pref: { category: string; key: string; value: string; confidence: number }, db?: any): void {
     if (!fs.existsSync(this.dbPath)) return;
 
-    const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
-    const db = new sqlite3.Database(this.dbPath);
+    const ownDb = !db;
+    if (ownDb) {
+      const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
+      db = new sqlite3.Database(this.dbPath);
+    }
 
     try {
       db.run(
@@ -525,7 +532,9 @@ export class SessionScanner {
         }
       );
     } finally {
-      db.close();
+      if (ownDb) {
+        db.close();
+      }
     }
   }
 

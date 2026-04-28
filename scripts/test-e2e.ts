@@ -50,7 +50,7 @@ async function main() {
   // 测试 1: 从零建表
   // ========================
   console.log('📦 [1/8] 从零建表...');
-  const ms = new MemorySystem('test-agent', TEST_DIR);
+  const ms = new MemorySystem('test-agent', TEST_DIR, TEST_DIR);
   const ks = new KnowledgeSystem('test-agent', TEST_DIR);
   
   await ms.init();

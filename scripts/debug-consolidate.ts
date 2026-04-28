@@ -8,7 +8,7 @@ if (fs.existsSync(testDir)) fs.rmSync(testDir, { recursive: true });
 fs.mkdirSync(testDir, { recursive: true });
 
 async function main() {
-  const ms = new MemorySystem('test-agent', testDir);
+  const ms = new MemorySystem('test-agent', testDir, testDir);
   await ms.init();
   
   const entryId = await ms.record({

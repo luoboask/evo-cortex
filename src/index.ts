@@ -871,12 +871,12 @@ const plugin = {
     const ksCache = new Map<string, KnowledgeSystem>();
     const hubFallbackCache = new Map<string, MemoryHub>(); // 仅用于 markdown 回退
 
-    function getOrCreateMemory(agentId: string, workspaceDir: string): { ms: MemorySystem; ks: KnowledgeSystem } {
+    function getOrCreateMemory(agentId: string, workspaceDir: string): { ms: MemorySystem | null; ks: KnowledgeSystem | null } {
       // MemorySystem
       if (!msCache.has(agentId)) {
         try {
           const dataDir = path.join(workspaceDir, 'data');
-          const ms = new MemorySystem(agentId, dataDir);
+          const ms = new MemorySystem(agentId, dataDir, workspaceDir);
           ms.init().catch(e => console.warn(`[evo-cortex] MemorySystem init failed for ${agentId}: ${e.message}`));
           try {
             const indexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
@@ -896,7 +896,7 @@ const plugin = {
           ksCache.set(agentId, ks);
         } catch { /* ignore */ }
       }
-      return { ms: msCache.get(agentId)!, ks: ksCache.get(agentId)! };
+      return { ms: msCache.get(agentId) || null, ks: ksCache.get(agentId) || null };
     }
 
     /** MemoryHub fallback — 仅用于 markdown 文件回退读取 */
@@ -989,6 +989,13 @@ const plugin = {
     const PREF_TTL = 5 * 60 * 1000;
     const _prefDbCache = new Map<string, any>(); // sqlite3 connection cache
 
+    function cleanupPrefDbCache(): void {
+      for (const db of _prefDbCache.values()) {
+        try { db.close(); } catch { /* ignore */ }
+      }
+      _prefDbCache.clear();
+    }
+
     async function loadPrefs(workspaceDir: string, agentId: string): Promise<string | null> {
       const cacheKey = agentId;
       const cached = prefCache.get(cacheKey);
@@ -1079,8 +1086,10 @@ const plugin = {
           // --- 3. 最近记忆摘要（MemoryHub 读取，~2ms，独立降级）---
           try {
             const { ms } = getOrCreateMemory(agentId, workspaceDir);
-            const summary = await ms.getRecentDailySummary(2);
-            if (summary) injectionParts.push(`\n=== 最近记忆 ===\n${summary}\n=== 结束 ===\n`);
+            if (ms) {
+              const summary = await ms.getRecentDailySummary(2);
+              if (summary) injectionParts.push(`\n=== 最近记忆 ===\n${summary}\n=== 结束 ===\n`);
+            }
           } catch (err: any) {
             logger.debug(`hook: recent summary skipped: ${err.message}`);
           }
@@ -1208,92 +1217,6 @@ const plugin = {
           return {};
         }
       }
-    );
-
-    // 2. message_sent — 记录完整对话对（用户消息 + AI 回复）
-    api.on(
-      "message_sent",
-      async (event: any, ctx: any) => {
-        try {
-          const sessionKey = event?.sessionKey || ctx?.sessionKey || '';
-          const parts = sessionKey.split(':');
-          const agentId = parts.length >= 2 ? parts[1] : 'main';
-          const workspaceDir = path.join(process.env.HOME || '', '.openclaw', `workspace-${agentId}`);
-          const logger = getLogger({ component: 'message_sent', agentId });
-
-          // 提取 AI 回复内容（outbound message）
-          const aiContent = event?.content || event?.message?.content || '';
-          if (!aiContent || aiContent.trim().length < 2) {
-            return;
-          }
-
-          // 跳过系统消息、工具调用结果等噪音
-          if (aiContent.startsWith('System (') || aiContent.startsWith('[openclaw]') || aiContent.includes('missing tool result')) {
-            return;
-          }
-
-          // 从 session 文件中提取最近的用户消息（找最后一条 user role）
-          let userMessage = '';
-          try {
-            const sessionsPath = path.join(process.env.HOME || '', '.openclaw', 'agents', agentId, 'sessions');
-            if (fs.existsSync(sessionsPath)) {
-              const files = fs.readdirSync(sessionsPath)
-                .filter((f: string) => f.endsWith('.jsonl') && !f.includes('trajectory'))
-                .map((f: string) => ({
-                  name: f,
-                  mtime: fs.statSync(path.join(sessionsPath, f)).mtimeMs
-                }))
-                .sort((a: any, b: any) => b.mtime - a.mtime);
-
-              if (files.length > 0) {
-                const latestPath = path.join(sessionsPath, files[0].name);
-                const content = fs.readFileSync(latestPath, 'utf-8');
-                const lines = content.split('\n').filter(l => l.trim());
-                // 从后往前找最后一条 user 消息
-                for (let i = lines.length - 1; i >= Math.max(0, lines.length - 20); i--) {
-                  try {
-                    const d = JSON.parse(lines[i]);
-                    const msg = d.message || d;
-                    if (msg.role === 'user') {
-                      let content2 = msg.content || '';
-                      if (Array.isArray(content2)) {
-                        content2 = content2
-                          .filter((t: any) => t.type === 'text')
-                          .map((t: any) => t.text)
-                          .join(' ');
-                      }
-                      userMessage = content2;
-                      break;
-                    }
-                  } catch { /* skip */ }
-                }
-              }
-            }
-          } catch (err: any) {
-            logger.debug(`failed to read session: ${err.message}`);
-          }
-
-          // 记录完整对话对
-          if (userMessage || aiContent) {
-            const { ms } = getOrCreateMemory(agentId, workspaceDir);
-            if (ms) {
-              const pairContent = userMessage
-                ? `User: ${userMessage}\n\nAI: ${aiContent}`
-                : `AI: ${aiContent}`;
-              ms.record({
-                type: 'conversation',
-                content: pairContent,
-                source: 'hook',
-                sourceRef: agentId,
-              }).catch((err: any) => logger.debug(`record failed: ${err.message}`));
-              logger.info(`recorded conversation pair (userLen=${userMessage.length}, aiLen=${aiContent.length})`);
-            }
-          }
-        } catch (err: any) {
-          logger.debug(`message_sent hook error: ${err.message}`);
-        }
-      },
-      { priority: 50 }
     );
 
     // 3. agent_end — AI 回复完成后记录完整对话对（用户问 → AI 答）
@@ -1430,6 +1353,10 @@ const plugin = {
     // Cron 需要通过 openclaw cron 命令单独配置
     // 示例：
     // openclaw cron add --schedule "0 * * * *" --payload '{"kind":"agentTurn","message":"运行分形思考"}' --sessionTarget isolated
+
+    // 插件卸载时清理缓存的 DB 连接
+    process.once('SIGTERM', cleanupPrefDbCache);
+    process.once('SIGINT', cleanupPrefDbCache);
 
     logger.info('Use openclaw cron to configure scheduled tasks');
     logger.info('All tools, hooks, and crons registered successfully');

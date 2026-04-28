@@ -38,7 +38,7 @@ async function main() {
 
   cleanup();
 
-  const ms = new MemorySystem('agent-r2', TEST_DIR);
+  const ms = new MemorySystem('agent-r2', TEST_DIR, TEST_DIR);
   const ks = new KnowledgeSystem('agent-r2', TEST_DIR);
   await ms.init();
   await ks.init();

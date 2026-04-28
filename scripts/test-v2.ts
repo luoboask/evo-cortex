@@ -19,7 +19,7 @@ async function main() {
 
   // --- 测试 1: init() 自动建表（从零启动）---
   console.log('[1/5] init() 自动建表...');
-  const ms = new MemorySystem('test-agent', testDbDir);
+  const ms = new MemorySystem('test-agent', testDbDir, testDbDir);
   const ks = new KnowledgeSystem('test-agent', testDbDir);
   await ms.init();
   await ks.init();
