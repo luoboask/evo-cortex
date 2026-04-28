@@ -33,10 +33,6 @@ function getOrCreateSharedMemoryIndexer(ctx: PluginContext): MemoryIndexer {
   return sharedMemoryIndexers.get(agentId)!;
 }
 
-// Session scanner throttle: agentId → last scan timestamp
-const lastScanTimes = new Map<string, number>();
-const SCAN_INTERVAL_MS = 30 * 60 * 1000; // 30 分钟
-
 // 全局标志：确保废弃警告只显示一次
 let deprecationWarningShown = false;
 
@@ -1327,22 +1323,17 @@ const plugin = {
             }
           }
 
-          // --- 节流 session scanner：每 30 分钟跑一次，提取偏好 + 整合工作记忆 ---
-          const now = Date.now();
-          const lastScan = lastScanTimes.get(agentId) || 0;
-          if (now - lastScan >= SCAN_INTERVAL_MS) {
-            lastScanTimes.set(agentId, now);
-            try {
-              const pluginCtx = buildPluginContext(ctx, api);
-              const scanner = new SessionScanner(pluginCtx);
-              scanner.scan().then(r => {
-                if (r.newSessions > 0 || r.preferencesExtracted > 0 || r.promoted > 0) {
-                  logger.info(`session scan: ${r.scanned} scanned, ${r.newSessions} new, ${r.preferencesExtracted} prefs, ${r.promoted} promoted`);
-                }
-              }).catch(err => logger.debug(`session scan failed: ${err.message}`));
-            } catch (err: any) {
-              logger.debug(`session scanner skipped: ${err.message}`);
-            }
+          // --- session scanner：每次 agent_end 都跑，fire-and-forget ---
+          try {
+            const pluginCtx = buildPluginContext(ctx, api);
+            const scanner = new SessionScanner(pluginCtx);
+            scanner.scan().then(r => {
+              if (r.newSessions > 0 || r.preferencesExtracted > 0 || r.promoted > 0) {
+                logger.info(`session scan: ${r.scanned} scanned, ${r.newSessions} new, ${r.preferencesExtracted} prefs, ${r.promoted} promoted`);
+              }
+            }).catch(err => logger.debug(`session scan failed: ${err.message}`));
+          } catch (err: any) {
+            logger.debug(`session scanner skipped: ${err.message}`);
           }
         } catch (err: any) {
           logger.debug(`agent_end hook error: ${err.message}`);
