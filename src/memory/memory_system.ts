@@ -728,7 +728,7 @@ export class MemorySystem {
          FROM long_term_memory
          WHERE date(created_at) >= date(?)
          ORDER BY importance DESC, created_at DESC
-         LIMIT 50`,
+         LIMIT 15`,
         [cutoffStr],
         (_err: Error | null, rows: any[]) => resolve(rows || [])
       );
