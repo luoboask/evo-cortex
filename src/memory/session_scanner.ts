@@ -506,16 +506,18 @@ export class SessionScanner {
     const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
     const db = new sqlite3.Database(this.dbPath);
 
-    db.run(
-      `INSERT OR REPLACE INTO preferences (category, key, value, confidence, extracted_at)
-       VALUES (?, ?, ?, ?, datetime('now'))`,
-      [pref.category, pref.key, pref.value, pref.confidence],
-      (err: Error | null) => {
-        if (err) console.error('[SessionScanner] Save pref error:', err);
-      }
-    );
-
-    db.close();
+    try {
+      db.run(
+        `INSERT OR REPLACE INTO preferences (category, key, value, confidence, extracted_at)
+         VALUES (?, ?, ?, ?, datetime('now'))`,
+        [pref.category, pref.key, pref.value, pref.confidence],
+        (err: Error | null) => {
+          if (err) console.error('[SessionScanner] Save pref error:', err);
+        }
+      );
+    } finally {
+      db.close();
+    }
   }
 
   /**

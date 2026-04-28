@@ -44,7 +44,7 @@ class Config:
         self.data_dir = self.workspace / 'data' / agent_id      # agent 隔离的数据目录
         
         # 文件 - 都在 agent 隔离目录下
-        self.db_path = self.data_dir / 'cortex.db'
+        self.db_path = self.data_dir / 'memory.db'
         self.pref_file = self.memory_dir / 'USER_PREFERENCES.md'
         self.today = datetime.now().strftime('%Y-%m-%d')
         self.daily_report = self.memory_dir / f'{self.today}.md'
@@ -180,6 +180,7 @@ class SessionScanner:
                     conn.close()
                 
                 # 同时写入 session_messages 表
+                conn2 = None
                 try:
                     conn2 = sqlite3.connect(str(self.config.data_dir / 'memory.db'))
                     cursor2 = conn2.cursor()
@@ -214,11 +215,13 @@ class SessionScanner:
                             )
                             msg_idx += 1
                     conn2.commit()
-                    conn2.close()
                     if msg_idx > 0:
                         print(f"   ✅ 已写入 {msg_idx} 条消息到 session_messages")
                 except Exception as e:
                     print(f"⚠️  写入 session_messages 失败: {e}")
+                finally:
+                    if conn2:
+                        conn2.close()
 
                 # 同时备份到短期记忆（防止工作记忆丢失）
                 try:
@@ -396,46 +399,48 @@ class PreferenceExtractor:
         """保存到数据库"""
         if not preferences:
             return
-        
+
         conn = sqlite3.connect(str(self.config.db_path))
-        cursor = conn.cursor()
-        
-        # 创建表（如果不存在）
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS preferences (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                category TEXT,
-                key TEXT NOT NULL,
-                value TEXT,
-                source TEXT,
-                confidence REAL DEFAULT 0.5,
-                extracted_at TEXT DEFAULT (datetime('now')),
-                confirmed INTEGER DEFAULT 0
-            )
-        ''')
-        
-        # 去重插入
-        for pref in preferences:
-            # 检查是否已存在
-            cursor.execute('SELECT id FROM preferences WHERE key LIKE ?', (f'%{pref["key"][:50]}%',))
-            if cursor.fetchone():
-                continue
-            
+        try:
+            cursor = conn.cursor()
+
+            # 创建表（如果不存在）
             cursor.execute('''
-                INSERT INTO preferences (key, value, category, confidence, source, extracted_at, confirmed)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                pref['key'],
-                pref['value'],
-                pref['category'],
-                pref['confidence'],
-                pref['source'],
-                pref['extracted_at'],
-                pref['confirmed']
-            ))
-        
-        conn.commit()
-        conn.close()
+                CREATE TABLE IF NOT EXISTS preferences (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category TEXT,
+                    key TEXT NOT NULL,
+                    value TEXT,
+                    source TEXT,
+                    confidence REAL DEFAULT 0.5,
+                    extracted_at TEXT DEFAULT (datetime('now')),
+                    confirmed INTEGER DEFAULT 0
+                )
+            ''')
+
+            # 去重插入
+            for pref in preferences:
+                # 检查是否已存在
+                cursor.execute('SELECT id FROM preferences WHERE key LIKE ?', (f'%{pref["key"][:50]}%',))
+                if cursor.fetchone():
+                    continue
+
+                cursor.execute('''
+                    INSERT INTO preferences (key, value, category, confidence, source, extracted_at, confirmed)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    pref['key'],
+                    pref['value'],
+                    pref['category'],
+                    pref['confidence'],
+                    pref['source'],
+                    pref['extracted_at'],
+                    pref['confirmed']
+                ))
+
+            conn.commit()
+        finally:
+            conn.close()
 
 
 # ────────────────────────────────────────────────
@@ -875,7 +880,6 @@ def _run_main_logic():
     print("╔══════════════════════════════════════════════╗")
     print("║  📊 Session Scan - 会话扫描与日报整理        ║")
     print("╚══════════════════════════════════════════════╝")
-    print("╚══════════════════════════════════════════════╝")
     print()
     print(f"📦 Agent: {agent_id}")
     print(f"🕐 时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -998,7 +1002,7 @@ class MemoryConsolidator:
     
     def __init__(self, config: Config):
         self.config = config
-        self.db_path = config.data_dir / 'cortex.db'
+        self.db_path = config.data_dir / 'memory.db'
     
     def consolidate_all(self) -> Dict[str, int]:
         """执行完整的记忆整合流程"""
