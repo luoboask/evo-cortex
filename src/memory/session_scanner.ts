@@ -49,12 +49,16 @@ export interface ScanState {
 }
 
 export interface WorkingMemoryEntry {
-  id: number;
-  session_id: string;
+  id: string;
+  type: string;
+  title: string | null;
   content: string;
+  importance: number;
+  tags: string;
+  source: string;
+  source_ref: string | null;
   created_at: string;
-  expires_at: string;
-  message_count: number;
+  expires_at: string | null;
 }
 
 export class SessionScanner {
@@ -169,10 +173,11 @@ export class SessionScanner {
     const db = new sqlite3.Database(this.dbPath);
 
     try {
-      // 查询所有未过期的工作记忆（排除最新 100 条，保护近期对话）
+      // 查询未过期的工作记忆（排除最新 100 条，保护近期对话）
+      // 注意：working_memory 表没有 session_id 列，改用 type + source_ref 分组
       const entries: WorkingMemoryEntry[] = await new Promise((resolve, reject) => {
         db.all(
-          `SELECT * FROM working_memory WHERE expires_at > datetime('now') AND id NOT IN (SELECT id FROM working_memory ORDER BY created_at DESC LIMIT 100) ORDER BY session_id, created_at`,
+          `SELECT * FROM working_memory WHERE expires_at > datetime('now') AND id NOT IN (SELECT id FROM working_memory ORDER BY created_at DESC LIMIT 100) ORDER BY type, created_at`,
           [],
           (err: Error | null, rows: WorkingMemoryEntry[]) => {
             if (err) reject(err);
@@ -183,50 +188,51 @@ export class SessionScanner {
 
       if (entries.length === 0) return 0;
 
-      // 按 session_id 分组
-      const bySession = new Map<string, WorkingMemoryEntry[]>();
+      // 按 type 分组（conversation / decision / bugfix / insight 等）
+      const byType = new Map<string, WorkingMemoryEntry[]>();
       for (const entry of entries) {
-        const list = bySession.get(entry.session_id) || [];
+        const list = byType.get(entry.type) || [];
         list.push(entry);
-        bySession.set(entry.session_id, list);
+        byType.set(entry.type, list);
       }
 
       let consolidated = 0;
       const lazyHub = await this.getMemoryHub();
 
-      for (const [sessionId, sessionEntries] of bySession) {
+      for (const [entryType, typeEntries] of byType) {
         // 去重：去除内容高度相似的条目
-        const deduplicated = this.deduplicateEntries(sessionEntries);
+        const deduplicated = this.deduplicateEntries(typeEntries);
 
         if (deduplicated.length === 0) continue;
 
-        // 合并：将短的对话合并为连贯记录
+        // 合并：将短对话合并为连贯记录
         const merged = this.mergeEntries(deduplicated);
 
         for (const m of merged) {
           // 写入长期记忆
           await lazyHub.add({
             content: m.content,
-            type: 'session',
+            type: entryType as any,
             timestamp: m.timestamp,
             metadata: {
-              sessionId,
               source: 'working_memory_consolidation',
               originalCount: m.originalCount
             }
           });
 
-          // 提取偏好
-          const prefs = this.extractPreferences(m.content);
-          for (const pref of prefs) {
-            this.savePreference(pref);
+          // 提取偏好（仅对 conversation 类型）
+          if (entryType === 'conversation') {
+            const prefs = this.extractPreferences(m.content);
+            for (const pref of prefs) {
+              this.savePreference(pref);
+            }
           }
 
           consolidated++;
         }
 
         // 标记已整合的工作记忆（设置 expires_at 为过去时间，让它自然清理）
-        const ids = sessionEntries.map(e => e.id);
+        const ids = typeEntries.map(e => e.id);
         const placeholders = ids.map(() => '?').join(',');
         await new Promise<void>((resolve, reject) => {
           db.run(
@@ -284,11 +290,12 @@ export class SessionScanner {
     content: string;
     timestamp: string;
     originalCount: number;
+    type: string;
   }> {
     if (entries.length === 0) return [];
 
     const MAX_CONTENT_LENGTH = 3000;
-    const merged: Array<{ content: string; timestamp: string; originalCount: number }> = [];
+    const merged: Array<{ content: string; timestamp: string; originalCount: number; type: string }> = [];
     let current = entries[0];
 
     for (let i = 1; i < entries.length; i++) {
@@ -306,7 +313,8 @@ export class SessionScanner {
         merged.push({
           content: current.content.slice(0, MAX_CONTENT_LENGTH),
           timestamp: current.created_at,
-          originalCount: 1
+          originalCount: 1,
+          type: current.type
         });
         current = next;
       }
@@ -316,7 +324,8 @@ export class SessionScanner {
     merged.push({
       content: current.content.slice(0, MAX_CONTENT_LENGTH),
       timestamp: current.created_at,
-      originalCount: 1
+      originalCount: 1,
+      type: current.type
     });
 
     return merged;

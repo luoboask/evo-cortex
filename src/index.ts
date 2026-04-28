@@ -611,7 +611,7 @@ const plugin = {
         }),
         async execute(_id: string, params: any) {
           try {
-            const ms = getOrCreateMS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const { ms } = getOrCreateMemory(pluginCtx.agentId, pluginCtx.workspaceDir);
             if (!ms) {
               return { content: [{ type: "text" as const, text: "MemorySystem not available" }] };
             }
@@ -650,7 +650,7 @@ const plugin = {
         }),
         async execute(_id: string, params: any) {
           try {
-            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const { ks } = getOrCreateMemory(pluginCtx.agentId, pluginCtx.workspaceDir);
             if (!ks) {
               return { content: [{ type: "text" as const, text: "KnowledgeSystem not available" }] };
             }
@@ -691,7 +691,7 @@ const plugin = {
         }),
         async execute(_id: string, params: any) {
           try {
-            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const { ks } = getOrCreateMemory(pluginCtx.agentId, pluginCtx.workspaceDir);
             if (!ks) {
               return { content: [{ type: "text" as const, text: "KnowledgeSystem not available" }] };
             }
@@ -725,8 +725,8 @@ const plugin = {
         }),
         async execute(_id: string, params: any) {
           try {
-            const ms = getOrCreateMS(pluginCtx.agentId, pluginCtx.workspaceDir);
-            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const { ms } = getOrCreateMemory(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const { ks } = getOrCreateMemory(pluginCtx.agentId, pluginCtx.workspaceDir);
             if (!ms) {
               return { content: [{ type: "text" as const, text: "MemorySystem not available" }] };
             }
@@ -775,8 +775,8 @@ const plugin = {
         parameters: Type.Object({}),
         async execute(_id: string) {
           try {
-            const ms = getOrCreateMS(pluginCtx.agentId, pluginCtx.workspaceDir);
-            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const { ms } = getOrCreateMemory(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const { ks } = getOrCreateMemory(pluginCtx.agentId, pluginCtx.workspaceDir);
             const result: any = {};
             if (ms) {
               result.memory = await ms.getStats();
@@ -811,7 +811,7 @@ const plugin = {
         parameters: Type.Object({}),
         async execute(_id: string) {
           try {
-            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const { ks } = getOrCreateMemory(pluginCtx.agentId, pluginCtx.workspaceDir);
             if (!ks) {
               return { content: [{ type: "text" as const, text: "KnowledgeSystem not available" }] };
             }
@@ -847,7 +847,7 @@ const plugin = {
         parameters: Type.Object({}),
         async execute(_id: string) {
           try {
-            const ks = getOrCreateKS(pluginCtx.agentId, pluginCtx.workspaceDir);
+            const { ks } = getOrCreateMemory(pluginCtx.agentId, pluginCtx.workspaceDir);
             if (!ks) {
               return { content: [{ type: "text" as const, text: "KnowledgeSystem not available" }] };
             }
@@ -866,65 +866,48 @@ const plugin = {
       };
     });
 
-    // ========== 实例缓存（避免每次 hook 都重建）==========
-    const hubCache = new Map<string, { memoryHub: MemoryHub; knowledgeSystem: KnowledgeSystem }>();
-
-    function getOrCreateHub(agentId: string, pluginCtx: any): { memoryHub: MemoryHub; knowledgeSystem: KnowledgeSystem } {
-      let cached = hubCache.get(agentId);
-      if (!cached) {
-        const dataDir = getDataDir(pluginCtx);
-        const ks = new KnowledgeSystem(agentId, dataDir);
-        ks.init().catch(err => console.error('[evo-cortex] KnowledgeSystem init error:', err));
-        cached = {
-          memoryHub: new MemoryHub(pluginCtx, config.memory, config.embedding, config.retention),
-          knowledgeSystem: ks
-        };
-        hubCache.set(agentId, cached);
-      }
-      return cached;
-    }
-
-    // ========== 新系统实例缓存 ==========
+    // ========== 统一实例缓存（MemorySystem 为主，KnowledgeSystem 共享）==========
     const msCache = new Map<string, MemorySystem>();
     const ksCache = new Map<string, KnowledgeSystem>();
+    const hubFallbackCache = new Map<string, MemoryHub>(); // 仅用于 markdown 回退
 
-    function getOrCreateMS(agentId: string, workspaceDir: string): MemorySystem | null {
+    function getOrCreateMemory(agentId: string, workspaceDir: string): { ms: MemorySystem; ks: KnowledgeSystem } {
+      // MemorySystem
       if (!msCache.has(agentId)) {
         try {
           const dataDir = path.join(workspaceDir, 'data');
           const ms = new MemorySystem(agentId, dataDir);
           ms.init().catch(e => console.warn(`[evo-cortex] MemorySystem init failed for ${agentId}: ${e.message}`));
-
-          // 注入 IndexBuilder（启用 FTS+向量融合搜索）
           try {
             const indexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
             const builder = indexer.getIndexBuilder();
             const hookLogger = getLogger({ component: 'memory_system_search' });
             ms.setIndexBuilder(builder, hookLogger);
-          } catch {
-            // IndexBuilder 不可用时降级为 LIKE 搜索，不影响正常使用
-          }
-
+          } catch { /* IndexBuilder 不可用时降级为 LIKE 搜索 */ }
           msCache.set(agentId, ms);
-        } catch {
-          return null;
-        }
+        } catch { /* ignore */ }
       }
-      return msCache.get(agentId)!;
-    }
-
-    function getOrCreateKS(agentId: string, workspaceDir: string): KnowledgeSystem | null {
+      // KnowledgeSystem
       if (!ksCache.has(agentId)) {
         try {
           const dataDir = path.join(workspaceDir, 'data');
           const ks = new KnowledgeSystem(agentId, dataDir);
           ks.init().catch(e => console.warn(`[evo-cortex] KnowledgeSystem init failed for ${agentId}: ${e.message}`));
           ksCache.set(agentId, ks);
-        } catch {
-          return null;
-        }
+        } catch { /* ignore */ }
       }
-      return ksCache.get(agentId)!;
+      return { ms: msCache.get(agentId)!, ks: ksCache.get(agentId)! };
+    }
+
+    /** MemoryHub fallback — 仅用于 markdown 文件回退读取 */
+    function getOrCreateHubFallback(agentId: string, pluginCtx: any): MemoryHub | null {
+      if (!hubFallbackCache.has(agentId)) {
+        try {
+          const hub = new MemoryHub(pluginCtx, config.memory, config.embedding, config.retention);
+          hubFallbackCache.set(agentId, hub);
+        } catch { return null; }
+      }
+      return hubFallbackCache.get(agentId) || null;
     }
 
 //    // 1. message_received hook - 保存对话到记忆
@@ -1095,8 +1078,8 @@ const plugin = {
 
           // --- 3. 最近记忆摘要（MemoryHub 读取，~2ms，独立降级）---
           try {
-            const { memoryHub } = getOrCreateHub(agentId, { agentId, workspaceDir } as any);
-            const summary = await memoryHub.getRecentDailySummary(2);
+            const { ms } = getOrCreateMemory(agentId, workspaceDir);
+            const summary = await ms.getRecentDailySummary(2);
             if (summary) injectionParts.push(`\n=== 最近记忆 ===\n${summary}\n=== 结束 ===\n`);
           } catch (err: any) {
             logger.debug(`hook: recent summary skipped: ${err.message}`);
@@ -1156,9 +1139,9 @@ const plugin = {
                 );
               };
 
-              let memories: any[];
+              let memories: any[] | undefined;
               try {
-                const ms = getOrCreateMS(agentId, workspaceDir);
+                const { ms } = getOrCreateMemory(agentId, workspaceDir);
                 if (ms) {
                   memories = await Promise.race([
                     ms.search({ text: userContent, limit: 3 }),
@@ -1169,11 +1152,13 @@ const plugin = {
                 }
               } catch {
                 // MemorySystem 不可用，回退到 MemoryHub
-                const { memoryHub } = getOrCreateHub(agentId, { agentId, workspaceDir } as any);
-                memories = await Promise.race([
-                  memoryHub.search(userContent, 3),
-                  remainingTimeout()
-                ]) as any[];
+                const hub = getOrCreateHubFallback(agentId, { agentId, workspaceDir } as any);
+                if (hub) {
+                  memories = await Promise.race([
+                    hub.search(userContent, 3),
+                    remainingTimeout()
+                  ]) as any[];
+                }
               }
 
               if (memories && memories.length > 0) {
@@ -1187,7 +1172,7 @@ const plugin = {
 
               // 知识图谱搜索（独立降级，使用剩余时间预算）
               try {
-                const ks = getOrCreateKS(agentId, workspaceDir);
+                const { ks } = getOrCreateMemory(agentId, workspaceDir);
                 if (ks) {
                   const knowledge = await Promise.race([
                     ks.searchEntities(userContent),
@@ -1290,7 +1275,7 @@ const plugin = {
 
           // 记录完整对话对
           if (userMessage || aiContent) {
-            const ms = getOrCreateMS(agentId, workspaceDir);
+            const { ms } = getOrCreateMemory(agentId, workspaceDir);
             if (ms) {
               const pairContent = userMessage
                 ? `User: ${userMessage}\n\nAI: ${aiContent}`
@@ -1376,7 +1361,7 @@ const plugin = {
 
           if (!lastAiMsg && !lastUserMsg) return;
 
-          const ms = getOrCreateMS(agentId, workspaceDir);
+          const { ms } = getOrCreateMemory(agentId, workspaceDir);
           if (ms) {
             const pairContent = lastUserMsg && lastAiMsg
               ? `User: ${lastUserMsg}\n\nAI: ${lastAiMsg}`
@@ -1391,36 +1376,16 @@ const plugin = {
             }).catch((err: any) => logger.debug(`record failed: ${err.message}`));
             logger.info(`agent_end: recorded pair (user=${lastUserMsg.length > 0}, ai=${lastAiMsg.length > 0})`);
 
-            // 持久化到 memory/*.md + 索引 memory.db（异步，不阻塞回复）
+            // 持久化到 memory/*.md（异步，不阻塞回复）
             try {
-              const hub = getOrCreateHub(agentId, { agentId, workspaceDir });
-              if (hub.memoryHub) {
-                const memEntry = {
-                  type: 'conversation' as const,
-                  content: pairContent,
-                  timestamp: new Date().toISOString(),
-                  agent: agentId,
-                  source: 'hook',
-                  sourceRef: agentId,
-                };
-                hub.memoryHub.persistToMarkdown(memEntry as any)
-                  .then(() => {
-                    logger.debug('persisted to memory/*.md');
-                    // 写完后触发 DB 索引更新（保证 .md 和 DB 都已更新）
-                    try {
-                      const memoryIndexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
-                      const builder = memoryIndexer.getIndexBuilder();
-                      builder.buildFromDb()
-                        .then(r => logger.info(`db index: ${r.dbRowsIndexed} rows, fts=${r.ftsCount}, vec=${r.vectorCount} in ${r.durationMs}ms`))
-                        .catch(err => logger.warn(`db index failed: ${err.message}`));
-                    } catch (err: any) {
-                      logger.debug(`db index trigger skipped: ${err.message}`);
-                    }
-                  })
-                  .catch(err => logger.debug(`persist failed: ${err.message}`));
-              }
+              ms.persistToMarkdown({
+                type: 'conversation',
+                content: pairContent,
+                source: 'hook',
+                sourceRef: agentId,
+              }).catch((err: any) => logger.debug(`persist failed: ${err.message}`));
             } catch (err: any) {
-              logger.debug(`agent_end persist+index skipped: ${err.message}`);
+              logger.debug(`persist skipped: ${err.message}`);
             }
           }
         } catch (err: any) {

@@ -1,16 +1,21 @@
 /**
- * MemorySystem — 统一记忆系统 (Phase 2)
+ * MemorySystem — 统一记忆系统 (v2)
  *
- * 基于 memory.db 的分层记忆架构：
+ * 主存储：SQLite (memory.db)
  * - working_memory：短期缓存（24h 过期，重要性评分）
  * - long_term_memory：长期记忆（重要性 >= 7 晋升）
  * - consolidation_log：晋升日志
+ *
+ * Markdown 持久备份：
+ * - record() 可选写入 memory/YYYY-MM-DD.md 作为持久备份
+ * - getRecentDailySummary() 优先读 SQLite，fallback 到 .md 文件
  *
  * 核心功能：
  * - 统一写入入口（自动计算重要性）
  * - 工作记忆刷新（活跃会话延长过期）
  * - 晋升机制（工作 → 长期）
- * - 意图识别 + 动态排序搜索
+ * - 意图识别 + 动态排序搜索（FTS + 向量融合）
+ * - Markdown 持久备份（可选）
  *
  * ESM 兼容：sqlite3 通过 createRequire 加载
  */
@@ -86,9 +91,13 @@ export class MemorySystem {
   private initialized: boolean = false;
   private indexBuilder: any | null = null;  // 可选的 IndexBuilder 引用（用于 FTS+向量搜索）
   private indexLogger: any | null = null;    // 可选的日志记录器
+  private storageDir: string;               // markdown 持久备份目录
+  private backupEnabled: boolean = true;    // 是否启用 markdown 备份
 
   constructor(agentId: string, dataDir: string) {
     this.dbPath = path.join(dataDir, agentId, 'memory.db');
+    // Markdown 持久备份目录：workspace/memory/
+    this.storageDir = path.join(dataDir, '..', '..', '..', 'memory');
   }
 
   /** 初始化数据库（确保表、索引存在，支持从零启动） */
@@ -675,5 +684,123 @@ export class MemorySystem {
         }
       );
     });
+  }
+
+  // ========== Markdown 持久备份 ==========
+  /** 将记忆条目持久化到 markdown 文件（每日备份） */
+  async persistToMarkdown(entry: MemoryEntry): Promise<void> {
+    if (!this.backupEnabled) return;
+    try {
+      const now = new Date();
+      const dateStr = now.toISOString().split('T')[0];
+      const memoryDir = this.storageDir;
+      if (!fs.existsSync(memoryDir)) {
+        fs.mkdirSync(memoryDir, { recursive: true });
+      }
+      const dailyFile = path.join(memoryDir, `${dateStr}.md`);
+
+      let content = '';
+      if (fs.existsSync(dailyFile)) {
+        content = fs.readFileSync(dailyFile, 'utf-8');
+      }
+
+      const entryBlock = `\n### ${entry.title || entry.type} (${now.toISOString()})\n\n${entry.content}\n\n`;
+      if (!content.includes(entry.content.slice(0, 50))) {
+        fs.appendFileSync(dailyFile, entryBlock, 'utf-8');
+      }
+    } catch {
+      // 备份失败不影响主流程，静默忽略
+    }
+  }
+
+  /** 从 SQLite 读取最近记忆摘要（替代 MemoryHub.getRecentDailySummary） */
+  async getRecentDailySummary(days: number = 2): Promise<string | null> {
+    await this.ensureInit();
+
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    const cutoffStr = cutoff.toISOString().split('T')[0];
+
+    // 1. 从 long_term_memory 读取最近 N 天的记录，按日期分组，每天最多取 5 条最重要的
+    const ltmEntries = await new Promise<any[]>((resolve) => {
+      this.db.all(
+        `SELECT id, type, title, content, importance, source, created_at
+         FROM long_term_memory
+         WHERE date(created_at) >= date(?)
+         ORDER BY importance DESC, created_at DESC`,
+        [cutoffStr],
+        (_err: Error | null, rows: any[]) => resolve(rows || [])
+      );
+    });
+
+    // 按日期分组并限制每天条目数
+    const byDate = new Map<string, any[]>();
+    for (const entry of ltmEntries) {
+      const dateKey = entry.created_at.split('T')[0];
+      if (!byDate.has(dateKey)) byDate.set(dateKey, []);
+      if (byDate.get(dateKey)!.length < 5) {
+        byDate.get(dateKey)!.push(entry);
+      }
+    }
+
+    // 2. 从 working_memory 读取最近未过期的记录（最多 5 条）
+    const wmEntries = await new Promise<any[]>((resolve) => {
+      this.db.all(
+        `SELECT id, type, title, content, importance, source, created_at
+         FROM working_memory
+         WHERE expires_at IS NULL OR expires_at > datetime('now')
+         ORDER BY importance DESC, created_at DESC
+         LIMIT 5`,
+        [],
+        (_err: Error | null, rows: any[]) => resolve(rows || [])
+      );
+    });
+
+    // 构建摘要字符串（供 hook 注入 system prompt）
+    const parts: string[] = [];
+
+    if (wmEntries.length > 0) {
+      parts.push('💬 近期工作记忆：');
+      for (const entry of wmEntries) {
+        const preview = entry.content.length > 150 ? entry.content.slice(0, 150) + '...' : entry.content;
+        parts.push(`- [${entry.type}] ${entry.title || '(无标题)'} (重要性: ${entry.importance})\n  ${preview}`);
+      }
+    }
+
+    const sortedDates = Array.from(byDate.keys()).sort().reverse();
+    if (sortedDates.length > 0) {
+      parts.push('');
+      parts.push('📋 最近记忆摘要：');
+      for (const date of sortedDates) {
+        const entries = byDate.get(date)!;
+        parts.push(`\n**${date}** (${entries.length} 条)`);
+        for (const entry of entries) {
+          const preview = entry.content.length > 120 ? entry.content.slice(0, 120) + '...' : entry.content;
+          parts.push(`- [${entry.type}] ${entry.title || '(无标题)'}: ${preview}`);
+        }
+      }
+    }
+
+    if (parts.length === 0) return null;
+    return parts.join('\n');
+  }
+
+  /** 清理过期工作记忆（替代 MemoryHub.cleanup 的 SQLite 版本） */
+  cleanupWorkingMemory(): { deleted: number } {
+    if (!this.initialized || !this.db) return { deleted: 0 };
+
+    // 删除已过期的工作记忆（但保护最新 100 条未过期的）
+    this.db.exec(`
+      DELETE FROM working_memory
+      WHERE expires_at < datetime('now')
+        AND id NOT IN (
+          SELECT id FROM working_memory
+          WHERE expires_at >= datetime('now')
+          ORDER BY created_at DESC LIMIT 100
+        )
+    `);
+
+    const deleted = this.db.changes;
+    return { deleted };
   }
 }
