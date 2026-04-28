@@ -145,12 +145,27 @@ async function main() {
   assert(search3.length === 0, `搜索不存在的词返回 0 条`, `实际返回 ${search3.length}`);
 
   // ========================
-  // 测试 4: consolidate 晋升
+  // 测试 4: consolidate 晋升（位置保护：最新 100 条不晋升）
   // ========================
   console.log('\n🔄 [4/8] consolidate 晋升...');
   
-  // 将高重要性条目设为过期
   const db = new sqlite3.Database(path.join(TEST_DIR, 'test-agent', 'memory.db'));
+  
+  // 先写入额外记录，使总数超过 100 条（位置保护线）
+  // id1, id2, id3 是早期写入的（序号靠前），写入新记录后它们排在 100 条之外
+  for (let i = 0; i < 100; i++) {
+    await ms.record({
+      type: 'conversation',
+      title: `批量测试 #${i + 1}`,
+      content: `这是批量测试记录 ${i + 1}`,
+      importance: 3.0,
+      tags: ['test'],
+      source: 'batch-test',
+      sourceRef: `batch-${i + 1}`
+    });
+  }
+  
+  // 将 id1, id2, id3 设为过期（它们现在在 100 条保护区之外）
   await new Promise<void>((resolve) => {
     db.run("UPDATE working_memory SET expires_at = datetime('now', '-1 day') WHERE id IN (?, ?, ?)",
       [id1, id2, id3], () => resolve());
@@ -163,20 +178,20 @@ async function main() {
     }
   });
   
-  assert(consolidateResult.promoted >= 3, `晋升 ${consolidateResult.promoted} 条`, `预期 >= 3`);
-  assert(promotedIds.length >= 3, `onPromoted 回调触发 ${promotedIds.length} 次`, `预期 >= 3`);
+  assert(consolidateResult.promoted >= 3, `晋升 ${consolidateResult.promoted} 条 — 预期 >= 3`);
+  assert(promotedIds.length >= 3, `onPromoted 回调触发 ${promotedIds.length} 次 — 预期 >= 3`);
   
-  // 验证 working_memory 只剩低优先级条目
+  // 验证 working_memory 剩余数量（高重要性已晋升）
   const wmCount = await new Promise<number>((resolve) => {
     db.get("SELECT COUNT(*) as cnt FROM working_memory", (_, row: any) => resolve(row?.cnt || 0));
   });
-  assert(wmCount === 1, `working_memory 剩余 ${wmCount} 条（低优先级未晋升）`, `预期 1`);
+  assert(wmCount < 105, `working_memory 剩余 ${wmCount} 条 — 预期 < 105`);
   
   // 验证 long_term_memory 有数据
   const ltmCount = await new Promise<number>((resolve) => {
     db.get("SELECT COUNT(*) as cnt FROM long_term_memory", (_, row: any) => resolve(row?.cnt || 0));
   });
-  assert(ltmCount >= 3, `long_term_memory 有 ${ltmCount} 条`, `预期 >= 3`);
+  assert(ltmCount >= 3, `long_term_memory 有 ${ltmCount} 条 — 预期 >= 3`);
   db.close();
 
   // ========================

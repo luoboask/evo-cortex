@@ -11,7 +11,6 @@ import { beforeToolCallHook } from "./hooks";
 import { MemoryIndexer } from "./memory/memory_indexer";
 import { IndexBuilder } from "./memory/index_builder";
 import { SessionScanner } from "./memory/session_scanner";
-import { scanNewSessions } from "./utils/session_scanner";
 import { WebCrawler } from "./knowledge/web_crawler";
 import { buildPluginContext, getMemoryStorageDir, getKnowledgeStorageDir, getDataDir, PluginContext } from "./utils/plugin-context";
 import { getLogger } from "./utils/logger";
@@ -33,6 +32,10 @@ function getOrCreateSharedMemoryIndexer(ctx: PluginContext): MemoryIndexer {
   }
   return sharedMemoryIndexers.get(agentId)!;
 }
+
+// Session scanner throttle: agentId → last scan timestamp
+const lastScanTimes = new Map<string, number>();
+const SCAN_INTERVAL_MS = 30 * 60 * 1000; // 30 分钟
 
 // 全局标志：确保废弃警告只显示一次
 let deprecationWarningShown = false;
@@ -986,7 +989,8 @@ const plugin = {
 
     // 1. message:received — 极简版：注入用户偏好 + 最近记忆标题摘要（<5ms，不搜索不写入）
     const prefCache = new Map<string, { content: string; ts: number }>();
-    const PREF_TTL = 5 * 60 * 1000;
+    const PREF_TTL = 5 * 60 * 1000;       // 有偏好时缓存 5 分钟
+    const EMPTY_PREF_TTL = 2 * 60 * 1000; // 空结果缓存 2 分钟
     const _prefDbCache = new Map<string, any>(); // sqlite3 connection cache
 
     function cleanupPrefDbCache(): void {
@@ -999,12 +1003,19 @@ const plugin = {
     async function loadPrefs(workspaceDir: string, agentId: string): Promise<string | null> {
       const cacheKey = agentId;
       const cached = prefCache.get(cacheKey);
-      if (cached && Date.now() - cached.ts < PREF_TTL) return cached.content;
+      if (cached) {
+        const ttl = cached.content === '' ? EMPTY_PREF_TTL : PREF_TTL;
+        if (Date.now() - cached.ts < ttl) return cached.content;
+      }
 
       try {
         const dataDir = path.join(workspaceDir, 'data', agentId);
         const kgPath = path.join(dataDir, 'knowledge.db');
-        if (!fs.existsSync(kgPath)) { prefCache.delete(cacheKey); return null; }
+        if (!fs.existsSync(kgPath)) {
+          // 文件不存在也缓存，避免每次消息都检查文件系统
+          prefCache.set(cacheKey, { content: '', ts: Date.now() });
+          return null;
+        }
 
         // 复用 sqlite 连接
         let db = _prefDbCache.get(agentId);
@@ -1021,7 +1032,11 @@ const plugin = {
           });
         });
 
-        if (rows.length === 0) { prefCache.delete(cacheKey); return null; }
+        if (rows.length === 0) {
+          // 缓存空结果 2 分钟，避免每次消息都查 DB
+          prefCache.set(cacheKey, { content: '', ts: Date.now() });
+          return null;
+        }
 
         const lines = rows.map(r => `- [${r.category}] ${r.value} (conf=${r.confidence.toFixed(1)})`);
         const injection = `\n=== 用户偏好 ===\n${lines.join('\n')}\n=== 结束 ===\n`;
@@ -1309,6 +1324,24 @@ const plugin = {
               }).catch((err: any) => logger.debug(`persist failed: ${err.message}`));
             } catch (err: any) {
               logger.debug(`persist skipped: ${err.message}`);
+            }
+          }
+
+          // --- 节流 session scanner：每 30 分钟跑一次，提取偏好 + 整合工作记忆 ---
+          const now = Date.now();
+          const lastScan = lastScanTimes.get(agentId) || 0;
+          if (now - lastScan >= SCAN_INTERVAL_MS) {
+            lastScanTimes.set(agentId, now);
+            try {
+              const pluginCtx = buildPluginContext(ctx, api);
+              const scanner = new SessionScanner(pluginCtx);
+              scanner.scan().then(r => {
+                if (r.newSessions > 0 || r.preferencesExtracted > 0 || r.promoted > 0) {
+                  logger.info(`session scan: ${r.scanned} scanned, ${r.newSessions} new, ${r.preferencesExtracted} prefs, ${r.promoted} promoted`);
+                }
+              }).catch(err => logger.debug(`session scan failed: ${err.message}`));
+            } catch (err: any) {
+              logger.debug(`session scanner skipped: ${err.message}`);
             }
           }
         } catch (err: any) {

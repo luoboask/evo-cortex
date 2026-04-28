@@ -514,19 +514,22 @@ export class SessionScanner {
    * 若传入 db 参数则复用已有连接，否则自行打开/关闭
    */
   private savePreference(pref: { category: string; key: string; value: string; confidence: number }, db?: any): void {
-    if (!fs.existsSync(this.dbPath)) return;
+    // preferences 写到 knowledge.db，不是 memory.db
+    const kgPath = this.dbPath.replace('memory.db', 'knowledge.db');
+    if (!fs.existsSync(kgPath)) return;
 
     const ownDb = !db;
     if (ownDb) {
       const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
-      db = new sqlite3.Database(this.dbPath);
+      db = new sqlite3.Database(kgPath);
     }
 
     try {
+      const prefId = `${pref.category}:${pref.key}:${Date.now()}`;
       db.run(
-        `INSERT OR REPLACE INTO preferences (category, key, value, confidence, extracted_at)
-         VALUES (?, ?, ?, ?, datetime('now'))`,
-        [pref.category, pref.key, pref.value, pref.confidence],
+        `INSERT OR REPLACE INTO preferences (id, category, value, confidence, source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'session_scan', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
+        [prefId, pref.category, pref.value, pref.confidence],
         (err: Error | null) => {
           if (err) console.error('[SessionScanner] Save pref error:', err);
         }

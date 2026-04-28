@@ -46,11 +46,11 @@ export class FtsIndex {
     const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
     this.db = new sqlite3.Database(this.dbPath);
     this.db.serialize(() => {
-      // FTS5 虚拟表 - 使用 unicode61 分词器（支持中文逐字切分）
+      // FTS5 虚拟表 - 使用 trigram 分词器（原生支持中日韩三元组切分）
       this.db.run(`CREATE VIRTUAL TABLE IF NOT EXISTS fts_content USING fts5(
         content,
         metadata,
-        tokenize='unicode61'
+        tokenize='trigram'
       )`);
 
       // 辅助表：存储文档 ID、内容和 FTS5 rowid 映射
@@ -280,7 +280,7 @@ export class FtsIndex {
           this.db.run(`CREATE VIRTUAL TABLE fts_content USING fts5(
             content,
             metadata,
-            tokenize='unicode61'
+            tokenize='trigram'
           )`, (err3: Error | null) => {
             err3 ? reject(err3) : resolve();
           });
