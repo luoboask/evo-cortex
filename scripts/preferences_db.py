@@ -32,7 +32,7 @@ class PreferencesDB:
         """获取数据库文件路径（使用 agent 隔离目录）"""
         home = Path.home()
         workspace = home / f".openclaw/workspace-{self.agent_id}"
-        return workspace / "data" / self.agent_id / "cortex.db"
+        return workspace / "data" / self.agent_id / "memory.db"
     
     def _connect(self) -> sqlite3.Connection:
         """建立数据库连接"""

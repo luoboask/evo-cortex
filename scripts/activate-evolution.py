@@ -14,6 +14,7 @@
 
 变更日志:
     2026-04-27: 数据源 cortex.db → memory.db；新增规则写回 knowledge.db
+    2026-04-28: 文档更新，确认 memory.db + knowledge.db 双库架构
     2026-04-27 v2: 增加数据清洗，过滤 session_scanner 垃圾数据
 """
 

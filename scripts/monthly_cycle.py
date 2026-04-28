@@ -87,7 +87,7 @@ def main():
 
     # 3. 统计报告
     print("\n📊 统计报告...")
-    db_path = data_dir / "cortex.db"
+    db_path = data_dir / "memory.db"
     if db_path.exists():
         conn = sqlite3.connect(str(db_path))
         cur = conn.cursor()

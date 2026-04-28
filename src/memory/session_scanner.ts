@@ -13,6 +13,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { createRequire } from 'module';
 import { PluginContext, getDataDir } from '../utils/plugin-context';
 import { MemoryHub } from './memory_hub';
 import type { KnowledgeSystem } from '../knowledge/knowledge_system';
@@ -80,7 +81,7 @@ export class SessionScanner {
     }
     this.stateFile = path.join(dataDir, '.session_scan_state.json');
     this.state = this.loadState();
-    this.dbPath = path.join(dataDir, 'cortex.db');
+    this.dbPath = path.join(dataDir, 'memory.db');
   }
 
   /**
@@ -164,14 +165,14 @@ export class SessionScanner {
   async consolidateWorkingMemory(knowledgeGraph?: KnowledgeSystem): Promise<number> {
     if (!fs.existsSync(this.dbPath)) return 0;
 
-    const sqlite3 = require('sqlite3').verbose();
+    const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
     const db = new sqlite3.Database(this.dbPath);
 
     try {
-      // 查询所有未过期的工作记忆
+      // 查询所有未过期的工作记忆（排除最新 100 条，保护近期对话）
       const entries: WorkingMemoryEntry[] = await new Promise((resolve, reject) => {
         db.all(
-          'SELECT * FROM working_memory WHERE expires_at > datetime(\'now\') ORDER BY session_id, created_at',
+          `SELECT * FROM working_memory WHERE expires_at > datetime('now') AND id NOT IN (SELECT id FROM working_memory ORDER BY created_at DESC LIMIT 100) ORDER BY session_id, created_at`,
           [],
           (err: Error | null, rows: WorkingMemoryEntry[]) => {
             if (err) reject(err);
@@ -226,10 +227,12 @@ export class SessionScanner {
 
         // 标记已整合的工作记忆（设置 expires_at 为过去时间，让它自然清理）
         const ids = sessionEntries.map(e => e.id);
-        await new Promise<void>((resolve) => {
+        const placeholders = ids.map(() => '?').join(',');
+        await new Promise<void>((resolve, reject) => {
           db.run(
-            `UPDATE working_memory SET expires_at = datetime('now', '-1 hour') WHERE id IN (${ids.join(',')})`,
-            () => resolve()
+            `UPDATE working_memory SET expires_at = datetime('now', '-1 hour') WHERE id IN (${placeholders})`,
+            ids,
+            (err: Error | null) => err ? reject(err) : resolve()
           );
         });
       }
@@ -500,7 +503,7 @@ export class SessionScanner {
   private savePreference(pref: { category: string; key: string; value: string; confidence: number }): void {
     if (!fs.existsSync(this.dbPath)) return;
 
-    const sqlite3 = require('sqlite3').verbose();
+    const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
     const db = new sqlite3.Database(this.dbPath);
 
     db.run(

@@ -5,10 +5,11 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { createRequire } from 'module';
 import { Logger } from '../utils/logger';
 
 // Dynamic require for sqlite3 (ESM compat)
-const sqlite3 = require('sqlite3').verbose();
+const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
 const Database = sqlite3.Database;
 
 interface ScanState {
@@ -229,7 +230,7 @@ export async function scanNewSessions(
     return result;
   }
 
-  const dbPath = path.join(dataDir, 'cortex.db');
+  const dbPath = path.join(dataDir, 'memory.db');
   const db = new sqlite3.Database(dbPath);
   ensureTables(db);
 

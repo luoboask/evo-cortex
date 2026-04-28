@@ -127,6 +127,24 @@ def main():
         print(f"   发现 {len(prefs)} 条偏好:")
         for p in prefs:
             print(f"     [{p['category']}] {p['value']}")
+
+        # 写入 knowledge.db
+        import uuid
+        kg_path = data_dir / 'knowledge.db'
+        if kg_path.exists():
+            kg_conn = sqlite3.connect(str(kg_path))
+            for p in prefs:
+                pid = f"pref_{uuid.uuid4().hex[:12]}"
+                kg_conn.execute(
+                    '''INSERT OR REPLACE INTO preferences (id, category, value, confidence, source, updated_at)
+                       VALUES (?, ?, ?, 0.5, 'active_learning', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))''',
+                    (pid, p['category'], p['value'])
+                )
+            kg_conn.commit()
+            kg_conn.close()
+            print(f"   ✅ {len(prefs)} 条偏好已写入 knowledge.db")
+        else:
+            print(f"   ⚠️ knowledge.db 不存在，偏好未保存")
     else:
         print("   未发现新偏好")
 

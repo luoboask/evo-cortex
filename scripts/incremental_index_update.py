@@ -4,7 +4,7 @@
 incremental_index_update.py - 增量索引自动更新
 
 扫描 memory 目录，对比 file_hashes，找出新增/修改的文件，
-更新 cortex.db 的 FTS5 索引和工作记忆，调用 Ollama 更新向量索引。
+更新 memory.db 的 FTS5 索引和工作记忆，调用 Ollama 更新向量索引。
 
 用法：
     python3 incremental_index_update.py cortex-test-agent
@@ -29,7 +29,7 @@ class Config:
         self.workspace = self.openclaw_root / f'workspace-{agent_id}'
         self.memory_dir = self.workspace / 'memory' / agent_id
         self.data_dir = self.workspace / 'data' / agent_id
-        self.db_path = self.data_dir / 'cortex.db'
+        self.db_path = self.data_dir / 'memory.db'
         self.ollama_url = os.environ.get('OLLAMA_URL', 'http://localhost:11434/v1/embeddings')
         self.embedding_model = os.environ.get('EMBEDDING_MODEL', 'bge-m3')
 

@@ -8,7 +8,8 @@
 
 import * as fs from "fs";
 import * as path from "path";
-import { PluginContext, getMemoryStorageDir } from "../utils/plugin-context";
+import { createRequire } from "module";
+import { PluginContext, getMemoryStorageDir, getDataDir } from "../utils/plugin-context";
 import { SemanticSearch, SearchableDocument } from "./semantic_search";
 import { getEmbedding, getEmbeddingLevel, simpleKeywordMatch } from "./embedding_provider";
 import { EmbeddingCache, cosineSimilarity } from "./embedding_cache";
@@ -620,39 +621,77 @@ export class MemoryHub {
   }
 
   /**
-   * 读取最近 N 天的 daily notes 标题摘要（轻量，不调用 embedding）
+   * 读取最近记忆摘要（轻量，不调用 embedding）
    * 用于在对话前自动注入上下文
+   * 策略：WM 最近对话 + LTM daily summary 结合，互补注入
    */
   async getRecentDailySummary(days: number = 2): Promise<string | null> {
-    const today = new Date();
-    const files: string[] = [];
-    for (let i = 0; i < days; i++) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      const fname = d.toISOString().slice(0, 10) + '.md';
-      const fpath = path.join(this.storageDir, fname);
-      if (fs.existsSync(fpath)) files.push(fpath);
+    const parts: string[] = [];
+
+    // ① WM 最近对话（最新鲜的上下文）
+    try {
+      const wmText = await this.getRecentWorkingMemorySummary(5);
+      if (wmText) parts.push(wmText);
+    } catch { /* skip */ }
+
+    // ② LTM daily summary（蒸馏后的长期知识）
+    try {
+      const today = new Date();
+      const files: string[] = [];
+      for (let i = 0; i < days; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const fname = d.toISOString().slice(0, 10) + '.md';
+        const fpath = path.join(this.storageDir, fname);
+        if (fs.existsSync(fpath)) files.push(fpath);
+      }
+
+      for (const f of files) {
+        try {
+          const content = fs.readFileSync(f, 'utf-8');
+          const headers = content.split('\n')
+            .filter(l => l.startsWith('## ') || l.startsWith('### '))
+            .slice(0, 8);
+          if (headers.length > 0) {
+            const date = path.basename(f, '.md');
+            parts.push(`[LTM ${date}]\n${headers.join('\n')}`);
+          }
+        } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+
+    if (parts.length === 0) return null;
+    return parts.join('\n\n');
+  }
+
+  /**
+   * 从 WM 读取最近 N 条对话摘要
+   */
+  private async getRecentWorkingMemorySummary(limit: number = 5): Promise<string | null> {
+    try {
+      const dbPath = path.join(getDataDir(this.ctx), 'memory.db');
+      if (!fs.existsSync(dbPath)) return null;
+      const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
+      const db = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY);
+      const rows: any[] = await new Promise((resolve, reject) => {
+        db.all(
+          `SELECT content, importance, created_at FROM working_memory ORDER BY created_at DESC LIMIT ?`,
+          [limit],
+          (err: Error | null, rows: any[]) => err ? reject(err) : resolve(rows || [])
+        );
+      });
+      db.close();
+
+      if (rows.length === 0) return null;
+
+      const lines = rows.map((r, i) => {
+        const preview = (r.content || '').replace(/\s+/g, ' ').substring(0, 120);
+        return `[${i + 1}] importance=${r.importance} | ${preview}...`;
+      });
+      return `=== WM 最近 ${rows.length} 条对话 ===\n${lines.join('\n')}\n=== 结束 ===`;
+    } catch {
+      return null;
     }
-
-    if (files.length === 0) return null;
-
-    // 只提取 ## 标题行，避免注入太多内容
-    const snippets: string[] = [];
-    for (const f of files) {
-      try {
-        const content = fs.readFileSync(f, 'utf-8');
-        const headers = content.split('\n')
-          .filter(l => l.startsWith('## ') || l.startsWith('### '))
-          .slice(0, 8);  // 每天最多取 8 个标题
-        if (headers.length > 0) {
-          const date = path.basename(f, '.md');
-          snippets.push(`[${date}]\n${headers.join('\n')}`);
-        }
-      } catch { /* skip */ }
-    }
-
-    if (snippets.length === 0) return null;
-    return snippets.join('\n\n');
   }
 
   private ensureDirectory(dir: string): void {

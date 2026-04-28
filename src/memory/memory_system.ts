@@ -291,7 +291,7 @@ export class MemorySystem {
   // ========== 晋升：工作 → 长期 ==========
 
   /**
-   * 将过期且重要性 >= 7 的 working_memory 晋升到 long_term_memory
+   * 将 working_memory 中最新 100 条之后的记录（importance >= 7）晋升到 long_term_memory
    * 使用事务保护，返回 { promoted, promotedIds }
    */
   async consolidate(options?: {
@@ -302,10 +302,10 @@ export class MemorySystem {
     const now = new Date().toISOString();
 
     return new Promise<{ promoted: number; promotedIds: string[] }>((resolve, reject) => {
-      // 1. 查找过期且重要性 >= 7 的记录（在事务外读取）
+      // 1. 最新 100 条之后的记录，importance >= 7 即晋升
       this.db.all(
-        `SELECT id, type, title, content, importance, tags, source, source_ref, created_at FROM working_memory WHERE expires_at < ? AND importance >= 7`,
-        [now],
+        `SELECT id, type, title, content, importance, tags, source, source_ref, created_at FROM working_memory WHERE importance >= 7 AND id NOT IN (SELECT id FROM working_memory ORDER BY created_at DESC LIMIT 100)`,
+        [],
         async (err: Error | null, rows: any[]) => {
           if (err) {
             reject(new Error(`consolidate query failed: ${err.message}`));

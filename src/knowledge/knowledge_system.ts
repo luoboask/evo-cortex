@@ -219,6 +219,16 @@ export class KnowledgeSystem {
               role       TEXT DEFAULT 'context',
               PRIMARY KEY (entity_id, ltm_id)
             )`, () => {});
+          this.db.run(`
+            CREATE TABLE IF NOT EXISTS preferences (
+              id          TEXT PRIMARY KEY,
+              category    TEXT NOT NULL,
+              value       TEXT NOT NULL,
+              confidence  REAL DEFAULT 0.5,
+              source      TEXT,
+              created_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+              updated_at  TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            )`, () => {});
           this.db.run('CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(type)', () => {});
           this.db.run('CREATE INDEX IF NOT EXISTS idx_entities_importance ON entities(importance DESC)', () => {});
           this.db.run('CREATE INDEX IF NOT EXISTS idx_relations_source ON relations(source_id)', () => {});

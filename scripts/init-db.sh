@@ -14,7 +14,7 @@ if [ -z "$DATA_DIR" ]; then
 fi
 
 mkdir -p "$DATA_DIR"
-DB_PATH="$DATA_DIR/cortex.db"
+DB_PATH="$DATA_DIR/memory.db"
 
 echo "📦 Initializing evo-cortex database at: $DB_PATH"
 

@@ -2,6 +2,7 @@ import type { OpenClawPluginApi, OpenClawPluginToolContext } from "openclaw/plug
 import { Type } from "@sinclair/typebox";
 import * as fs from 'fs';
 import * as path from 'path';
+import { createRequire } from 'module';
 import { MemoryHub } from "./memory/memory_hub";
 import { MemorySystem } from "./memory/memory_system";
 import { KnowledgeSystem } from "./knowledge/knowledge_system";
@@ -718,7 +719,7 @@ const plugin = {
 
       return {
         name: "consolidate_memory",
-        description: "将过期且重要性 >= 7 的工作记忆晋升到长期记忆，并触发知识图谱更新",
+        description: "将 working_memory 中最新 100 条之后且 importance >= 7 的记录晋升到长期记忆，并触发知识图谱更新",
         parameters: Type.Object({
           run_knowledge_update: Type.Optional(Type.Boolean({ description: "是否触发知识系统更新", default: true }))
         }),
@@ -1001,29 +1002,44 @@ const plugin = {
     // ========== Hooks ==========
 
     // 1. message:received — 极简版：注入用户偏好 + 最近记忆标题摘要（<5ms，不搜索不写入）
-    const prefCache = new Map<string, { content: string; mtime: number; ts: number }>();
+    const prefCache = new Map<string, { content: string; ts: number }>();
     const PREF_TTL = 5 * 60 * 1000;
+    const _prefDbCache = new Map<string, any>(); // sqlite3 connection cache
 
     async function loadPrefs(workspaceDir: string, agentId: string): Promise<string | null> {
-      const prefFile = path.join(workspaceDir, 'USER_PREFERENCES.md');
-      const cacheKey = `${agentId}:${prefFile}`;
+      const cacheKey = agentId;
       const cached = prefCache.get(cacheKey);
-      if (cached && Date.now() - cached.ts < PREF_TTL) {
-        try {
-          const stat = fs.statSync(prefFile);
-          if (stat.mtimeMs === cached.mtime) return cached.content;
-        } catch { /* file deleted */ }
-      }
-      if (!fs.existsSync(prefFile)) { prefCache.delete(cacheKey); return null; }
+      if (cached && Date.now() - cached.ts < PREF_TTL) return cached.content;
+
       try {
-        const content = fs.readFileSync(prefFile, 'utf-8');
-        const stat = fs.statSync(prefFile);
-        const checked = content.match(/\[x\].+/g)?.map(l => l.replace(/\[x\]\s*/, '').trim()).filter(Boolean) || [];
-        if (checked.length === 0) return null;
-        const injection = `\n=== 用户偏好 ===\n${checked.join('\n')}\n=== 结束 ===\n`;
-        prefCache.set(cacheKey, { content: injection, mtime: stat.mtimeMs, ts: Date.now() });
+        const dataDir = path.join(workspaceDir, 'data', agentId);
+        const kgPath = path.join(dataDir, 'knowledge.db');
+        if (!fs.existsSync(kgPath)) { prefCache.delete(cacheKey); return null; }
+
+        // 复用 sqlite 连接
+        let db = _prefDbCache.get(agentId);
+        if (!db) {
+          const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
+          db = new sqlite3.Database(kgPath);
+          _prefDbCache.set(agentId, db);
+        }
+
+        const rows = await new Promise<any[]>((resolve, reject) => {
+          db.all('SELECT category, value, confidence FROM preferences WHERE confidence >= 0.3 ORDER BY confidence DESC, updated_at DESC LIMIT 10', (err: Error | null, rows: any[]) => {
+            if (err) return reject(err);
+            resolve(rows || []);
+          });
+        });
+
+        if (rows.length === 0) { prefCache.delete(cacheKey); return null; }
+
+        const lines = rows.map(r => `- [${r.category}] ${r.value} (conf=${r.confidence.toFixed(1)})`);
+        const injection = `\n=== 用户偏好 ===\n${lines.join('\n')}\n=== 结束 ===\n`;
+        prefCache.set(cacheKey, { content: injection, ts: Date.now() });
         return injection;
-      } catch { return null; }
+      } catch {
+        return null;
+      }
     }
 
     // 判断是否是真实对话（过滤 cron、系统事件、工具调用等噪声）
@@ -1094,7 +1110,7 @@ const plugin = {
               const kgDbPath = path.join(dataDirPath, 'knowledge.db');
               if (fs.existsSync(kgDbPath)) {
                 // 用 createRequire 兼容 ESM
-                const sqlite3 = require('sqlite3');
+                const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
                 const db = new sqlite3.Database(kgDbPath, sqlite3.OPEN_READONLY);
                 const rules: any[] = await new Promise((resolve, reject) => {
                   db.all(

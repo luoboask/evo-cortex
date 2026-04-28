@@ -25,7 +25,7 @@ class Config:
         self.agent_id = agent_id
         self.workspace = Path.home() / '.openclaw' / f'workspace-{agent_id}'
         self.data_dir = self.workspace / 'data' / agent_id
-        self.db_path = self.data_dir / 'cortex.db'
+        self.db_path = self.data_dir / 'memory.db'
         self.knowledge_dir = self.workspace / 'knowledge' / agent_id
         
         # 确保目录存在

@@ -160,26 +160,28 @@ class SessionScanner:
                 tags = self._extract_tags(full_content)
                 
                 # 🆕 P1: 新会话先存入工作记忆
-                conn = sqlite3.connect(str(self.config.data_dir / 'cortex.db'))
-                cursor = conn.cursor()
-                
-                # 计算过期时间（对话结束后 2 小时）
-                from datetime import datetime, timedelta
-                expires_at = (datetime.now() + timedelta(hours=2)).isoformat()
-                
-                cursor.execute("""
-                    INSERT INTO working_memory (session_id, content, created_at, expires_at, message_count)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (session_id, full_content, datetime.now().isoformat(), expires_at, len(messages)))
-                
-                conn.commit()
-                conn.close()
-                
-                print(f"   ✅ 已存入工作记忆 #{cursor.lastrowid} (过期：{expires_at})")
+                conn = sqlite3.connect(str(self.config.data_dir / 'memory.db'))
+                try:
+                    cursor = conn.cursor()
+                    
+                    # 计算过期时间（对话结束后 2 小时）
+                    from datetime import datetime, timedelta
+                    expires_at = (datetime.now() + timedelta(hours=2)).isoformat()
+                    
+                    cursor.execute("""
+                        INSERT INTO working_memory (session_id, content, created_at, expires_at, message_count)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (session_id, full_content, datetime.now().isoformat(), expires_at, len(messages)))
+                    
+                    conn.commit()
+                    
+                    print(f"   ✅ 已存入工作记忆 #{cursor.lastrowid} (过期：{expires_at})")
+                finally:
+                    conn.close()
                 
                 # 同时写入 session_messages 表
                 try:
-                    conn2 = sqlite3.connect(str(self.config.data_dir / 'cortex.db'))
+                    conn2 = sqlite3.connect(str(self.config.data_dir / 'memory.db'))
                     cursor2 = conn2.cursor()
                     cursor2.execute('''
                         CREATE TABLE IF NOT EXISTS session_messages (
@@ -454,13 +456,15 @@ class PreferencesSync:
             return
         
         conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # 获取所有偏好
-        cursor.execute('SELECT * FROM preferences ORDER BY category, confirmed DESC')
-        preferences = cursor.fetchall()
-        conn.close()
+        try:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 获取所有偏好
+            cursor.execute('SELECT * FROM preferences ORDER BY category, confirmed DESC')
+            preferences = cursor.fetchall()
+        finally:
+            conn.close()
         
         if not preferences:
             print("⏭️  没有偏好需要同步")
@@ -524,27 +528,28 @@ class DailyReportGenerator:
             return
         
         conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-        
-        # 检查表是否存在
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='session_memories'")
-        if not cursor.fetchone():
-            print("⏭️  session_memories 表不存在")
+        try:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            # 检查表是否存在
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='session_memories'")
+            if not cursor.fetchone():
+                print("⏭️  session_memories 表不存在")
+                return
+            
+            # 获取今天的记录
+            today_start = datetime.now().strftime('%Y-%m-%d') + ' 00:00:00'
+            cursor.execute("""
+                SELECT id, session_id, content, importance, created_at, tags
+                FROM session_memories
+                WHERE date(created_at) = date(?)
+                ORDER BY created_at ASC
+            """, (today_start,))
+            
+            memories = cursor.fetchall()
+        finally:
             conn.close()
-            return
-        
-        # 获取今天的记录
-        today_start = datetime.now().strftime('%Y-%m-%d') + ' 00:00:00'
-        cursor.execute("""
-            SELECT id, session_id, content, importance, created_at, tags
-            FROM session_memories
-            WHERE date(created_at) = date(?)
-            ORDER BY created_at ASC
-        """, (today_start,))
-        
-        memories = cursor.fetchall()
-        conn.close()
         
         if not memories:
             print("⏭️  今日暂无会话记录")
@@ -747,58 +752,59 @@ class StatsReporter:
             return
         
         conn = sqlite3.connect(str(self.config.db_path))
-        cursor = conn.cursor()
-        
-        # 偏好统计
-        print("💾 偏好数据库:")
-        cursor.execute("SELECT COUNT(*) FROM preferences")
-        print(f"  • 总偏好数：{cursor.fetchone()[0]}")
-        
-        cursor.execute("SELECT COUNT(*) FROM preferences WHERE confirmed=0")
-        print(f"  • 待确认：{cursor.fetchone()[0]}")
-        
-        cursor.execute("SELECT COUNT(*) FROM preferences WHERE confirmed=1")
-        print(f"  • 已确认：{cursor.fetchone()[0]}")
-        
-        cursor.execute("SELECT AVG(confidence) FROM preferences WHERE confidence IS NOT NULL")
-        avg_conf = cursor.fetchone()[0]
-        if avg_conf:
-            print(f"  • 平均置信度：{int(avg_conf*100)}%")
-        
-        print()
-        
-        # 会话统计
-        print("💬 会话记忆:")
         try:
-            cursor.execute("SELECT COUNT(*) FROM session_memories")
-            print(f"  • 存储的会话记录：{cursor.fetchone()[0]} 条")
+            cursor = conn.cursor()
             
-            cursor.execute("SELECT COUNT(*) FROM raw_sessions")
-            print(f"  • 扫描的原始会话：{cursor.fetchone()[0]} 个")
-        except:
-            print("  • session_memories 表不存在")
-        
-        print()
-        
-        # 日报统计
-        if self.config.daily_report.exists():
-            event_count = 0
+            # 偏好统计
+            print("💾 偏好数据库:")
+            cursor.execute("SELECT COUNT(*) FROM preferences")
+            print(f"  • 总偏好数：{cursor.fetchone()[0]}")
+            
+            cursor.execute("SELECT COUNT(*) FROM preferences WHERE confirmed=0")
+            print(f"  • 待确认：{cursor.fetchone()[0]}")
+            
+            cursor.execute("SELECT COUNT(*) FROM preferences WHERE confirmed=1")
+            print(f"  • 已确认：{cursor.fetchone()[0]}")
+            
+            cursor.execute("SELECT AVG(confidence) FROM preferences WHERE confidence IS NOT NULL")
+            avg_conf = cursor.fetchone()[0]
+            if avg_conf:
+                print(f"  • 平均置信度：{int(avg_conf*100)}%")
+            
+            print()
+            
+            # 会话统计
+            print("💬 会话记忆:")
             try:
-                with open(self.config.daily_report, 'r', encoding='utf-8') as f:
-                    event_count = sum(1 for line in f if line.strip().startswith('- ['))
+                cursor.execute("SELECT COUNT(*) FROM session_memories")
+                print(f"  • 存储的会话记录：{cursor.fetchone()[0]} 条")
+                
+                cursor.execute("SELECT COUNT(*) FROM raw_sessions")
+                print(f"  • 扫描的原始会话：{cursor.fetchone()[0]} 个")
             except:
-                pass
+                print("  • session_memories 表不存在")
             
-            file_size = self.config.daily_report.stat().st_size
+            print()
             
-            print("📰 今日日报:")
-            print(f"  • 文件：{self.config.daily_report}")
-            print(f"  • 事件数：{event_count} 个")
-            print(f"  • 大小：{file_size} 字节")
-        else:
-            print("📰 今日日报：尚未生成")
-        
-        conn.close()
+            # 日报统计
+            if self.config.daily_report.exists():
+                event_count = 0
+                try:
+                    with open(self.config.daily_report, 'r', encoding='utf-8') as f:
+                        event_count = sum(1 for line in f if line.strip().startswith('- ['))
+                except:
+                    pass
+                
+                file_size = self.config.daily_report.stat().st_size
+                
+                print("📰 今日日报:")
+                print(f"  • 文件：{self.config.daily_report}")
+                print(f"  • 事件数：{event_count} 个")
+                print(f"  • 大小：{file_size} 字节")
+            else:
+                print("📰 今日日报：尚未生成")
+        finally:
+            conn.close()
         print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 
@@ -1025,28 +1031,30 @@ class MemoryConsolidator:
     def _consolidate_short_to_long(self) -> int:
         """将高重要性短期记忆整合到长期记忆"""
         conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        
-        # 查找 importance >= 7 且未整合的记录
-        cursor.execute('''
-            INSERT OR IGNORE INTO long_term_memory 
-            (session_id, content, memory_type, importance, tags, metadata, consolidated_from)
-            SELECT 
-                session_id,
-                content,
-                'important_event',
-                importance,
-                tags,
-                metadata,
-                'short_term'
-            FROM short_term_memory
-            WHERE importance >= 7.0
-            AND session_id NOT IN (SELECT session_id FROM long_term_memory)
-        ''')
-        
-        moved = cursor.rowcount
-        conn.commit()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            
+            # 查找 importance >= 7 且未整合的记录
+            cursor.execute('''
+                INSERT OR IGNORE INTO long_term_memory 
+                (session_id, content, memory_type, importance, tags, metadata, consolidated_from)
+                SELECT 
+                    session_id,
+                    content,
+                    'important_event',
+                    importance,
+                    tags,
+                    metadata,
+                    'short_term'
+                FROM short_term_memory
+                WHERE importance >= 7.0
+                AND session_id NOT IN (SELECT session_id FROM long_term_memory)
+            ''')
+            
+            moved = cursor.rowcount
+            conn.commit()
+        finally:
+            conn.close()
         
         if moved > 0:
             print(f"   ✅ 整合 {moved} 条高重要性记忆到长期存储")
@@ -1056,16 +1064,18 @@ class MemoryConsolidator:
     def _clean_expired_working_memory(self) -> int:
         """清理过期的工作记忆（>2 小时）"""
         conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        
-        cursor.execute("""
-            DELETE FROM working_memory
-            WHERE expires_at < datetime('now')
-        """)
-        
-        deleted = cursor.rowcount
-        conn.commit()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                DELETE FROM working_memory
+                WHERE expires_at < datetime('now')
+            """)
+            
+            deleted = cursor.rowcount
+            conn.commit()
+        finally:
+            conn.close()
         
         if deleted > 0:
             print(f"   🗑️  清理 {deleted} 条过期工作记忆")
@@ -1075,19 +1085,21 @@ class MemoryConsolidator:
     def _clean_expired_short_term(self) -> int:
         """清理过期的短期记忆（>30 天）"""
         conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            DELETE FROM short_term_memory
-            WHERE expires_at < datetime('now')
-            AND session_id NOT IN (
-                SELECT session_id FROM long_term_memory
-            )
-        ''')
-        
-        deleted = cursor.rowcount
-        conn.commit()
-        conn.close()
+        try:
+            cursor = conn.cursor()
+            
+            cursor.execute('''
+                DELETE FROM short_term_memory
+                WHERE expires_at < datetime('now')
+                AND session_id NOT IN (
+                    SELECT session_id FROM long_term_memory
+                )
+            ''')
+            
+            deleted = cursor.rowcount
+            conn.commit()
+        finally:
+            conn.close()
         
         if deleted > 0:
             print(f"   🗑️  清理 {deleted} 条过期短期记忆")
@@ -1097,31 +1109,32 @@ class MemoryConsolidator:
     def get_stats(self) -> Dict:
         """获取各层记忆的统计信息"""
         conn = sqlite3.connect(str(self.db_path))
-        cursor = conn.cursor()
-        
-        stats = {}
-        
-        # 工作记忆
-        cursor.execute('SELECT COUNT(*) FROM working_memory')
-        stats['working_count'] = cursor.fetchone()[0]
-        
-        # 短期记忆
-        cursor.execute('SELECT COUNT(*) FROM short_term_memory')
-        stats['short_count'] = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT COUNT(*) FROM short_term_memory WHERE expires_at < datetime("now", "+7 days")')
-        stats['short_expiring_soon'] = cursor.fetchone()[0]
-        
-        # 长期记忆
-        cursor.execute('SELECT COUNT(*) FROM long_term_memory')
-        stats['long_count'] = cursor.fetchone()[0]
-        
-        cursor.execute('SELECT AVG(importance) FROM long_term_memory')
-        stats['long_avg_importance'] = round(cursor.fetchone()[0] or 0, 2)
-        
-        conn.close()
-        
-        return stats
+        try:
+            cursor = conn.cursor()
+            
+            stats = {}
+            
+            # 工作记忆
+            cursor.execute('SELECT COUNT(*) FROM working_memory')
+            stats['working_count'] = cursor.fetchone()[0]
+            
+            # 短期记忆
+            cursor.execute('SELECT COUNT(*) FROM short_term_memory')
+            stats['short_count'] = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT COUNT(*) FROM short_term_memory WHERE expires_at < datetime("now", "+7 days")')
+            stats['short_expiring_soon'] = cursor.fetchone()[0]
+            
+            # 长期记忆
+            cursor.execute('SELECT COUNT(*) FROM long_term_memory')
+            stats['long_count'] = cursor.fetchone()[0]
+            
+            cursor.execute('SELECT AVG(importance) FROM long_term_memory')
+            stats['long_avg_importance'] = round(cursor.fetchone()[0] or 0, 2)
+            
+            return stats
+        finally:
+            conn.close()
 
 
 # ────────────────────────────────────────────────

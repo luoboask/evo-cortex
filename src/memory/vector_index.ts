@@ -44,7 +44,7 @@ export class VectorIndexStore {
   init(): void {
     if (this.initialized) return;
     const require = createRequire(import.meta.url);
-    const sqlite3 = require('sqlite3').verbose();
+    const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
     this.db = new sqlite3.Database(this.dbPath);
     this.db.serialize(() => {
       // 向量存储表
