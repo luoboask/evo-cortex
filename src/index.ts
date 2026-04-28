@@ -1229,8 +1229,6 @@ const plugin = {
     api.on(
       "message_sent",
       async (event: any, ctx: any) => {
-        // DEBUG: 写文件确认 hook 是否被调用
-        try { fs.appendFileSync('/tmp/evo-debug-sending.log', `${new Date().toISOString()} HOOK FIRED | eventKeys=${Object.keys(event||{}).join(',')} | content=${(event?.content||'').substring(0,80)} | ctxKeys=${Object.keys(ctx||{}).join(',')} | sessionKey=${ctx?.sessionKey||'(none)'}\n`); } catch {}
         try {
           const sessionKey = event?.sessionKey || ctx?.sessionKey || '';
           const parts = sessionKey.split(':');
@@ -1307,7 +1305,7 @@ const plugin = {
             }
           }
         } catch (err: any) {
-          // silent
+          logger.debug(`message_sent hook error: ${err.message}`);
         }
       },
       { priority: 50 }
@@ -1426,7 +1424,7 @@ const plugin = {
             }
           }
         } catch (err: any) {
-          // silent
+          logger.debug(`agent_end hook error: ${err.message}`);
         }
       },
       { priority: 50 }

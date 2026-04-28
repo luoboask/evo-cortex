@@ -90,20 +90,22 @@ def main():
     db_path = data_dir / "memory.db"
     if db_path.exists():
         conn = sqlite3.connect(str(db_path))
-        cur = conn.cursor()
-        for table, label in [
-            ("working_memory", "工作记忆"),
-            ("session_messages", "会话消息"),
-            ("preferences", "偏好设置"),
-            ("scan_log", "扫描日志"),
-        ]:
-            try:
-                cur.execute(f"SELECT COUNT(*) FROM {table}")
-                count = cur.fetchone()[0]
-                print(f"  {label}: {count} 条")
-            except Exception:
-                print(f"  {label}: 表不存在")
-        conn.close()
+        try:
+            cur = conn.cursor()
+            for table, label in [
+                ("working_memory", "工作记忆"),
+                ("session_messages", "会话消息"),
+                ("preferences", "偏好设置"),
+                ("scan_log", "扫描日志"),
+            ]:
+                try:
+                    cur.execute(f"SELECT COUNT(*) FROM {table}")
+                    count = cur.fetchone()[0]
+                    print(f"  {label}: {count} 条")
+                except Exception:
+                    print(f"  {label}: 表不存在")
+        finally:
+            conn.close()
     else:
         print("  数据库不存在")
 

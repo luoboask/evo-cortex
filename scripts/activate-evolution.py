@@ -84,54 +84,55 @@ class EvolutionEventExtractor:
             return []
         
         conn = sqlite3.connect(self.config.memory_db)
-        conn.row_factory = sqlite3.Row
-        cur = conn.cursor()
-        
-        events = []
-        ltm_count = 0
-        wm_count = 0
-        
-        # 1. 从 long_term_memory 提取（已筛选，质量最高）
-        cur.execute('''
-            SELECT id, type, title, content, importance, tags, source, source_ref, created_at
-            FROM long_term_memory
-            WHERE importance >= ?
-            ORDER BY importance DESC, created_at DESC
-            LIMIT ?
-        ''', (min_importance, limit))
-        
-        for row in cur.fetchall():
-            entry = dict(row)
-            if is_clean_content(entry.get('content', '')):
-                event = self._classify_event(entry)
-                if event:
-                    events.append(event)
-                    ltm_count += 1
-        
-        # 2. WM 补充（过滤垃圾数据）
-        remaining = limit - len(events)
-        if remaining > 0:
+        try:
+            conn.row_factory = sqlite3.Row
+            cur = conn.cursor()
+
+            events = []
+            ltm_count = 0
+            wm_count = 0
+
+            # 1. 从 long_term_memory 提取（已筛选，质量最高）
             cur.execute('''
                 SELECT id, type, title, content, importance, tags, source, source_ref, created_at
-                FROM working_memory
+                FROM long_term_memory
                 WHERE importance >= ?
-                  AND content IS NOT NULL AND content != ''
                 ORDER BY importance DESC, created_at DESC
-            ''', (min_importance,))
-            
+                LIMIT ?
+            ''', (min_importance, limit))
+
             for row in cur.fetchall():
-                if len(events) >= limit:
-                    break
                 entry = dict(row)
-                # 过滤垃圾内容
-                if not is_clean_content(entry.get('content', '')):
-                    continue
-                event = self._classify_event(entry)
-                if event:
-                    events.append(event)
-                    wm_count += 1
-        
-        conn.close()
+                if is_clean_content(entry.get('content', '')):
+                    event = self._classify_event(entry)
+                    if event:
+                        events.append(event)
+                        ltm_count += 1
+
+            # 2. WM 补充（过滤垃圾数据）
+            remaining = limit - len(events)
+            if remaining > 0:
+                cur.execute('''
+                    SELECT id, type, title, content, importance, tags, source, source_ref, created_at
+                    FROM working_memory
+                    WHERE importance >= ?
+                      AND content IS NOT NULL AND content != ''
+                    ORDER BY importance DESC, created_at DESC
+                ''', (min_importance,))
+
+                for row in cur.fetchall():
+                    if len(events) >= limit:
+                        break
+                    entry = dict(row)
+                    # 过滤垃圾内容
+                    if not is_clean_content(entry.get('content', '')):
+                        continue
+                    event = self._classify_event(entry)
+                    if event:
+                        events.append(event)
+                        wm_count += 1
+        finally:
+            conn.close()
         print(f"   📊 有效数据: LTM {ltm_count} 条, WM {wm_count} 条")
         return events
     
@@ -280,43 +281,45 @@ class RuleWriter:
             return {'inserted': 0, 'updated': 0, 'skipped': 0}
         
         conn = sqlite3.connect(self.config.knowledge_db)
-        cur = conn.cursor()
-        # 自修复：确保 rules 表存在
-        cur.execute('''CREATE TABLE IF NOT EXISTS rules (
-            id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL,
-            condition TEXT, action TEXT, confidence REAL DEFAULT 0.5,
-            support_count INTEGER DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now')),
-            updated_at TEXT DEFAULT (datetime('now')))''')
-        stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
-        
-        for rule in rules:
-            # 模糊匹配：提取 title 前缀（去掉计数字）
-            title_prefix = rule['title'].split('(')[0].strip()
-            cur.execute('SELECT id, confidence FROM rules WHERE title LIKE ?', (f'{title_prefix}%',))
-            existing = cur.fetchone()
-            
-            if existing:
-                new_conf = max(existing[1], rule['confidence'])
-                cur.execute('''
-                    UPDATE rules 
-                    SET confidence = ?, action = ?, updated_at = datetime('now'),
-                        support_count = COALESCE(support_count, 0) + 1
-                    WHERE id = ?
-                ''', (new_conf, rule['action'], existing[0]))
-                stats['updated'] += 1
-                print(f"   🔄 更新规则: {rule['title']} (置信度 {existing[1]:.0%} → {new_conf:.0%})")
-            else:
-                rule_id = f"rule_{uuid.uuid4().hex[:8]}"
-                cur.execute('''
-                    INSERT INTO rules (id, type, title, condition, action, confidence, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-                ''', (rule_id, rule['type'], rule['title'], rule['condition'], rule['action'], rule['confidence']))
-                stats['inserted'] += 1
-                print(f"   ➕ 新规则: {rule['title']} (置信度 {rule['confidence']:.0%})")
-        
-        conn.commit()
-        conn.close()
+        try:
+            cur = conn.cursor()
+            # 自修复：确保 rules 表存在
+            cur.execute('''CREATE TABLE IF NOT EXISTS rules (
+                id TEXT PRIMARY KEY, type TEXT NOT NULL, title TEXT NOT NULL,
+                condition TEXT, action TEXT, confidence REAL DEFAULT 0.5,
+                support_count INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now')),
+                updated_at TEXT DEFAULT (datetime('now')))''')
+            stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
+
+            for rule in rules:
+                # 模糊匹配：提取 title 前缀（去掉计数字）
+                title_prefix = rule['title'].split('(')[0].strip()
+                cur.execute('SELECT id, confidence FROM rules WHERE title LIKE ?', (f'{title_prefix}%',))
+                existing = cur.fetchone()
+
+                if existing:
+                    new_conf = max(existing[1], rule['confidence'])
+                    cur.execute('''
+                        UPDATE rules
+                        SET confidence = ?, action = ?, updated_at = datetime('now'),
+                            support_count = COALESCE(support_count, 0) + 1
+                        WHERE id = ?
+                    ''', (new_conf, rule['action'], existing[0]))
+                    stats['updated'] += 1
+                    print(f"   🔄 更新规则: {rule['title']} (置信度 {existing[1]:.0%} → {new_conf:.0%})")
+                else:
+                    rule_id = f"rule_{uuid.uuid4().hex[:8]}"
+                    cur.execute('''
+                        INSERT INTO rules (id, type, title, condition, action, confidence, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
+                    ''', (rule_id, rule['type'], rule['title'], rule['condition'], rule['action'], rule['confidence']))
+                    stats['inserted'] += 1
+                    print(f"   ➕ 新规则: {rule['title']} (置信度 {rule['confidence']:.0%})")
+
+            conn.commit()
+        finally:
+            conn.close()
         return stats
 
 

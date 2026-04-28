@@ -182,133 +182,133 @@ export class IndexBuilder {
         new Promise((resolve, reject) =>
           db.all(sql, params, (err: Error | null, rows: any[]) => err ? reject(err) : resolve(rows || [])));
 
-      // 读取 WM + LTM 条目，排除已索引的（增量）
-      const indexedIds = Object.keys(this.dbIndexState);
-      const whereClause = indexedIds.length > 0
-        ? `WHERE id NOT IN (${indexedIds.map(() => '?').join(',')})`
-        : '';
-      const params = indexedIds.length > 0 ? indexedIds : [];
+      try {
+        // 读取 WM + LTM 条目，排除已索引的（增量）
+        const indexedIds = Object.keys(this.dbIndexState);
+        const whereClause = indexedIds.length > 0
+          ? `WHERE id NOT IN (${indexedIds.map(() => '?').join(',')})`
+          : '';
+        const queryParams = indexedIds.length > 0 ? indexedIds : [];
 
-      const [wmRows, ltmRows] = await Promise.all([
-        dbAll(`SELECT id, type, title, content, importance, tags, source, source_ref, created_at FROM working_memory ${whereClause}`, params),
-        dbAll(`SELECT id, type, title, content, importance, tags, source, source_ref, created_at, consolidated_from FROM long_term_memory ${whereClause}`, params),
-      ]);
-      db.close();
+        const [wmRows, ltmRows] = await Promise.all([
+          dbAll(`SELECT id, type, title, content, importance, tags, source, source_ref, created_at FROM working_memory ${whereClause}`, queryParams),
+          dbAll(`SELECT id, type, title, content, importance, tags, source, source_ref, created_at, consolidated_from FROM long_term_memory ${whereClause}`, queryParams),
+        ]);
 
-      result.dbRowsScanned = wmRows.length + ltmRows.length;
-      if (result.dbRowsScanned === 0) {
-        console.log(`[IndexBuilder] buildFromDb: no new rows to index`);
-        return result;
-      }
-
-      // 合并为文档列表，用 original_id 去重（WM 晋升到 LTM 后 WM 条目被删除）
-      const allRows = [
-        ...wmRows.map((r: any) => ({ ...r, _table: 'working_memory' })),
-        ...ltmRows.map((r: any) => ({ ...r, _table: 'long_term_memory' })),
-      ];
-
-      const ftsDocs: FtsDocument[] = [];
-      const vecDocs: VectorDocument[] = [];
-
-      for (const row of allRows) {
-        const docId = `db_${row.id}`;
-        const content = row.content || '';
-        if (!content || content.trim().length < 10) continue; // 跳过太短的条目
-
-        ftsDocs.push({
-          id: docId,
-          content,
-          metadata: { type: row.type, table: row._table, importance: row.importance, source: row.source }
-        });
-
-        // 向量索引：内容分块（每块 ~500 字符）
-        const chunks = this.splitContent(content);
-        for (let i = 0; i < chunks.length; i++) {
-          vecDocs.push({
-            id: `${docId}_chunk_${i}`,
-            content: chunks[i],
-            embedding: [],
-            metadata: { type: row.type, table: row._table, chunk: i }
-          });
+        result.dbRowsScanned = wmRows.length + ltmRows.length;
+        if (result.dbRowsScanned === 0) {
+          console.log(`[IndexBuilder] buildFromDb: no new rows to index`);
+          return result;
         }
 
-        this.dbIndexState[row.id] = { indexedAt: new Date().toISOString(), table: row._table };
-        result.dbRowsIndexed++;
-      }
+        // 合并为文档列表，用 original_id 去重（WM 晋升到 LTM 后 WM 条目被删除）
+        const allRows = [
+          ...wmRows.map((r: any) => ({ ...r, _table: 'working_memory' })),
+          ...ltmRows.map((r: any) => ({ ...r, _table: 'long_term_memory' })),
+        ];
 
-      // 批量索引 FTS
-      if (ftsDocs.length > 0) {
-        result.ftsCount = await this.ftsIndex.indexBatch(ftsDocs);
-      }
+        const ftsDocs: FtsDocument[] = [];
+        const vecDocs: VectorDocument[] = [];
 
-      // 批量计算向量 embedding
-      if (vecDocs.length > 0) {
-        const texts = vecDocs.map(d => d.content);
-        const embeddings = await getEmbeddingsBatch(texts);
-        let vecCount = 0;
-        for (let i = 0; i < vecDocs.length; i++) {
-          if (embeddings[i]) {
-            vecDocs[i].embedding = embeddings[i]!;
-            await this.vectorStore.upsert(vecDocs[i]);
-            vecCount++;
+        for (const row of allRows) {
+          const docId = `db_${row.id}`;
+          const content = row.content || '';
+          if (!content || content.trim().length < 10) continue; // 跳过太短的条目
+
+          ftsDocs.push({
+            id: docId,
+            content,
+            metadata: { type: row.type, table: row._table, importance: row.importance, source: row.source }
+          });
+
+          // 向量索引：内容分块（每块 ~500 字符）
+          const chunks = this.splitContent(content);
+          for (let i = 0; i < chunks.length; i++) {
+            vecDocs.push({
+              id: `${docId}_chunk_${i}`,
+              content: chunks[i],
+              embedding: [],
+              metadata: { type: row.type, table: row._table, chunk: i }
+            });
+          }
+
+          this.dbIndexState[row.id] = { indexedAt: new Date().toISOString(), table: row._table };
+          result.dbRowsIndexed++;
+        }
+
+        // 批量索引 FTS
+        if (ftsDocs.length > 0) {
+          result.ftsCount = await this.ftsIndex.indexBatch(ftsDocs);
+        }
+
+        // 批量计算向量 embedding
+        if (vecDocs.length > 0) {
+          const texts = vecDocs.map(d => d.content);
+          const embeddings = await getEmbeddingsBatch(texts);
+          let vecCount = 0;
+          for (let i = 0; i < vecDocs.length; i++) {
+            if (embeddings[i]) {
+              vecDocs[i].embedding = embeddings[i]!;
+              await this.vectorStore.upsert(vecDocs[i]);
+              vecCount++;
+            }
+          }
+          result.vectorCount = vecCount;
+        }
+
+        // 清理已删除的 WM 条目索引（WM 晋升后被删除，但索引可能残留）
+        const ltmConsolidatedFrom = ltmRows
+          .filter((r: any) => r.consolidated_from)
+          .map((r: any) => r.consolidated_from);
+        for (const oldWmId of ltmConsolidatedFrom) {
+          const oldDocId = `db_${oldWmId}`;
+          await this.ftsIndex.remove(oldDocId);
+          await this.vectorStore.remove(oldDocId);
+          delete this.dbIndexState[oldWmId];
+        }
+
+        // 迁移清理：删除旧版文件扫描遗留的 file_* 条目
+        const fileDocIds = await this.ftsIndex.listByPrefix('file_');
+        let cleanedFiles = 0;
+        for (const docId of fileDocIds) {
+          await this.ftsIndex.remove(docId);
+          await this.vectorStore.remove(docId);
+          cleanedFiles++;
+        }
+        if (cleanedFiles > 0) {
+          console.log(`[IndexBuilder] migrated ${cleanedFiles} legacy file-scan entries from FTS index`);
+        }
+
+        // 清理 dbIndexState 中已不存在的条目（TTL 删除、手动删除等）
+        const allDbIds = new Set<string>();
+        if (dbPath && fs.existsSync(dbPath)) {
+          const checkDb = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY);
+          const checkDbAll = (sql: string): Promise<string[]> =>
+            new Promise((resolve, reject) =>
+              checkDb.all(sql, [], (err: Error | null, rows: any[]) => err ? reject(err) : resolve(rows?.map((r: any) => r.id as string) || [])));
+          const [allWmIds, allLtmIds] = await Promise.all([
+            checkDbAll('SELECT id FROM working_memory'),
+            checkDbAll('SELECT id FROM long_term_memory'),
+          ]);
+          checkDb.close();
+          for (const id of allWmIds) allDbIds.add(id);
+          for (const id of allLtmIds) allDbIds.add(id);
+        }
+        let staleCleaned = 0;
+        for (const indexedId of Object.keys(this.dbIndexState)) {
+          if (allDbIds.size > 0 && !allDbIds.has(indexedId)) {
+            const staleDocId = `db_${indexedId}`;
+            await this.ftsIndex.remove(staleDocId);
+            await this.vectorStore.remove(staleDocId);
+            delete this.dbIndexState[indexedId];
+            staleCleaned++;
           }
         }
-        result.vectorCount = vecCount;
-      }
-
-      // 清理已删除的 WM 条目索引（WM 晋升后被删除，但索引可能残留）
-      // 修复：row.id 本身已含 wm_ 前缀，直接用 db_${oldWmId}
-      const ltmConsolidatedFrom = ltmRows
-        .filter((r: any) => r.consolidated_from)
-        .map((r: any) => r.consolidated_from);
-      for (const oldWmId of ltmConsolidatedFrom) {
-        const oldDocId = `db_${oldWmId}`;
-        await this.ftsIndex.remove(oldDocId);
-        await this.vectorStore.remove(oldDocId);
-        delete this.dbIndexState[oldWmId];
-      }
-
-      // 迁移清理：删除旧版文件扫描遗留的 file_* 条目（rebuild/update 已删除）
-      // 每次运行都会检查，幂等操作，无 file_* 条目时开销可忽略
-      const fileDocIds = await this.ftsIndex.listByPrefix('file_');
-      let cleanedFiles = 0;
-      for (const docId of fileDocIds) {
-        await this.ftsIndex.remove(docId);
-        await this.vectorStore.remove(docId);
-        cleanedFiles++;
-      }
-      if (cleanedFiles > 0) {
-        console.log(`[IndexBuilder] migrated ${cleanedFiles} legacy file-scan entries from FTS index`);
-      }
-
-      // 清理 dbIndexState 中已不存在的条目（TTL 删除、手动删除等）
-      // 注意：需要查询全部 DB ID（不是仅新行），否则会把正常已索引条目误判为 stale
-      const allDbIds = new Set<string>();
-      if (dbPath && fs.existsSync(dbPath)) {
-        const checkDb = new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY);
-        const checkDbAll = (sql: string): Promise<string[]> =>
-          new Promise((resolve, reject) =>
-            checkDb.all(sql, [], (err: Error | null, rows: any[]) => err ? reject(err) : resolve(rows?.map((r: any) => r.id as string) || [])));
-        const [allWmIds, allLtmIds] = await Promise.all([
-          checkDbAll('SELECT id FROM working_memory'),
-          checkDbAll('SELECT id FROM long_term_memory'),
-        ]);
-        checkDb.close();
-        for (const id of allWmIds) allDbIds.add(id);
-        for (const id of allLtmIds) allDbIds.add(id);
-      }
-      let staleCleaned = 0;
-      for (const indexedId of Object.keys(this.dbIndexState)) {
-        if (allDbIds.size > 0 && !allDbIds.has(indexedId)) {
-          const staleDocId = `db_${indexedId}`;
-          await this.ftsIndex.remove(staleDocId);
-          await this.vectorStore.remove(staleDocId);
-          delete this.dbIndexState[indexedId];
-          staleCleaned++;
+        if (staleCleaned > 0) {
+          console.log(`[IndexBuilder] cleaned ${staleCleaned} stale index entries (deleted from DB)`);
         }
-      }
-      if (staleCleaned > 0) {
-        console.log(`[IndexBuilder] cleaned ${staleCleaned} stale index entries (deleted from DB)`);
+      } finally {
+        db.close();
       }
 
       result.durationMs = Date.now() - startTime;

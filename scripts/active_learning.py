@@ -33,20 +33,21 @@ def main():
         return
 
     conn = sqlite3.connect(memory_db)
-    conn.row_factory = sqlite3.Row
+    try:
+        conn.row_factory = sqlite3.Row
 
-    # 读取近 7 天数据
-    week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+        # 读取近 7 天数据
+        week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
 
-    ltm_rows = conn.execute('''
-        SELECT title, content, type FROM long_term_memory WHERE created_at >= ?
-    ''', (week_ago,)).fetchall()
+        ltm_rows = conn.execute('''
+            SELECT title, content, type FROM long_term_memory WHERE created_at >= ?
+        ''', (week_ago,)).fetchall()
 
-    wm_rows = conn.execute('''
-        SELECT title, content, type FROM working_memory WHERE created_at >= ? LIMIT 100
-    ''', (week_ago,)).fetchall()
-
-    conn.close()
+        wm_rows = conn.execute('''
+            SELECT title, content, type FROM working_memory WHERE created_at >= ? LIMIT 100
+        ''', (week_ago,)).fetchall()
+    finally:
+        conn.close()
 
     all_entries = list(ltm_rows) + list(wm_rows)
     print(f"📝 从 memory.db 读取 {len(all_entries)} 条记录")
@@ -133,15 +134,17 @@ def main():
         kg_path = data_dir / 'knowledge.db'
         if kg_path.exists():
             kg_conn = sqlite3.connect(str(kg_path))
-            for p in prefs:
-                pid = f"pref_{uuid.uuid4().hex[:12]}"
-                kg_conn.execute(
-                    '''INSERT OR REPLACE INTO preferences (id, category, value, confidence, source, updated_at)
-                       VALUES (?, ?, ?, 0.5, 'active_learning', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))''',
-                    (pid, p['category'], p['value'])
-                )
-            kg_conn.commit()
-            kg_conn.close()
+            try:
+                for p in prefs:
+                    pid = f"pref_{uuid.uuid4().hex[:12]}"
+                    kg_conn.execute(
+                        '''INSERT OR REPLACE INTO preferences (id, category, value, confidence, source, updated_at)
+                           VALUES (?, ?, ?, 0.5, 'active_learning', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))''',
+                        (pid, p['category'], p['value'])
+                    )
+                kg_conn.commit()
+            finally:
+                kg_conn.close()
             print(f"   ✅ {len(prefs)} 条偏好已写入 knowledge.db")
         else:
             print(f"   ⚠️ knowledge.db 不存在，偏好未保存")

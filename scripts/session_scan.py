@@ -18,12 +18,11 @@ session_scan.py - Evo-Cortex 会话扫描与日报整理系统
 """
 
 import sys
-import os
 import json
 import sqlite3
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 import re
 
 # ────────────────────────────────────────────────
@@ -685,11 +684,11 @@ class DataCleaner:
             清理的记录数
         """
         import sqlite3
-        
-        conn = sqlite3.connect(str(self.config.db_path))
-        cursor = conn.cursor()
-        
+
+        conn = None
         try:
+            conn = sqlite3.connect(str(self.config.db_path))
+            cursor = conn.cursor()
             # 获取所有 session_id
             cursor.execute("SELECT DISTINCT session_id FROM session_memories")
             sessions = [row[0] for row in cursor.fetchall()]
@@ -737,7 +736,8 @@ class DataCleaner:
             conn.rollback()
             return 0
         finally:
-            conn.close()
+            if conn:
+                conn.close()
 
 
 class StatsReporter:

@@ -142,36 +142,37 @@ def main():
     
     db = PreferencesDB(agent_id)
     added = 0
-    
-    for text, category, confidence in prefs:
-        # 二次过滤：排除明显的垃圾数据
-        if text.startswith('- [ ]') or text.startswith('- [x]'):
-            print(f"  ⏭️  跳过 Markdown 格式：{text[:50]}...")
-            continue
-        if '条 - "' in text or text.startswith('> '):
-            print(f"  ⏭️  跳过提取记录：{text[:50]}...")
-            continue
-        if text.count('(') > 3 or text.count('pending') > 1:
-            print(f"  ⏭️  跳过重复格式：{text[:50]}...")
-            continue
-        
-        pref_id = db.add_preference(
-            text=text,
-            category=category,
-            confidence=confidence,
-            source=filename,
-            metadata={'extraction_method': 'string_match'}
-        )
-        
-        if pref_id > 0:
-            display_text = text[:60] + "..." if len(text) > 60 else text
-            print(f"    ✨ {display_text} ({category}, {int(confidence*100)}%)")
-            added += 1
-        else:
-            print(f"    ⏭️  已存在：{text[:40]}...")
-    
-    db.close()
-    
+
+    try:
+        for text, category, confidence in prefs:
+            # 二次过滤：排除明显的垃圾数据
+            if text.startswith('- [ ]') or text.startswith('- [x]'):
+                print(f"  ⏭️  跳过 Markdown 格式：{text[:50]}...")
+                continue
+            if '条 - "' in text or text.startswith('> '):
+                print(f"  ⏭️  跳过提取记录：{text[:50]}...")
+                continue
+            if text.count('(') > 3 or text.count('pending') > 1:
+                print(f"  ⏭️  跳过重复格式：{text[:50]}...")
+                continue
+
+            pref_id = db.add_preference(
+                text=text,
+                category=category,
+                confidence=confidence,
+                source=filename,
+                metadata={'extraction_method': 'string_match'}
+            )
+
+            if pref_id > 0:
+                display_text = text[:60] + "..." if len(text) > 60 else text
+                print(f"    ✨ {display_text} ({category}, {int(confidence*100)}%)")
+                added += 1
+            else:
+                print(f"    ⏭️  已存在：{text[:40]}...")
+    finally:
+        db.close()
+
     if added > 0:
         print(f"\n  ✨ 本轮提取：{added} 条")
 

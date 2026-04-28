@@ -185,13 +185,15 @@ def main():
 
     # 读取并过滤
     conn = sqlite3.connect(memory_db)
-    conn.row_factory = sqlite3.Row
-    week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
+    try:
+        conn.row_factory = sqlite3.Row
+        week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
 
-    ltm_all = conn.execute(
-        'SELECT id, type, title, content, importance, created_at FROM long_term_memory WHERE created_at >= ? ORDER BY importance DESC',
-        (week_ago,)).fetchall()
-    conn.close()
+        ltm_all = conn.execute(
+            'SELECT id, type, title, content, importance, created_at FROM long_term_memory WHERE created_at >= ? ORDER BY importance DESC',
+            (week_ago,)).fetchall()
+    finally:
+        conn.close()
 
     # 仅使用 LTM（WM 全是 session_scanner 垃圾）
     all_entries = ltm_all
@@ -204,11 +206,13 @@ def main():
         print("   提示：运行 daily_compress.py 将 WM 晋升到 LTM，或等新 hook 写入数据")
         # 仍然创建空库（确保 schema 存在）
         kconn = sqlite3.connect(knowledge_db)
-        kconn.execute('CREATE TABLE IF NOT EXISTS entities (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, type TEXT DEFAULT \'concept\', importance REAL DEFAULT 0.5, last_mentioned TEXT, created_at TEXT, updated_at TEXT)')
-        kconn.execute('CREATE TABLE IF NOT EXISTS relations (id TEXT PRIMARY KEY, source_id TEXT, target_id TEXT, type TEXT DEFAULT \'related\', strength REAL DEFAULT 0.5, discovered_at TEXT)')
-        kconn.execute('CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY, type TEXT, title TEXT, condition TEXT, action TEXT, confidence REAL DEFAULT 0.5, support_count INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT)')
-        kconn.commit()
-        kconn.close()
+        try:
+            kconn.execute('CREATE TABLE IF NOT EXISTS entities (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, type TEXT DEFAULT \'concept\', importance REAL DEFAULT 0.5, last_mentioned TEXT, created_at TEXT, updated_at TEXT)')
+            kconn.execute('CREATE TABLE IF NOT EXISTS relations (id TEXT PRIMARY KEY, source_id TEXT, target_id TEXT, type TEXT DEFAULT \'related\', strength REAL DEFAULT 0.5, discovered_at TEXT)')
+            kconn.execute('CREATE TABLE IF NOT EXISTS rules (id TEXT PRIMARY KEY, type TEXT, title TEXT, condition TEXT, action TEXT, confidence REAL DEFAULT 0.5, support_count INTEGER DEFAULT 0, created_at TEXT, updated_at TEXT)')
+            kconn.commit()
+        finally:
+            kconn.close()
         print("   ✅ 空库已创建（schema 就绪）")
         return
 
@@ -230,92 +234,93 @@ def main():
     # 写入 knowledge.db
     print("\n📦 写入 knowledge.db...")
     kconn = sqlite3.connect(knowledge_db)
+    try:
+        kconn.execute('''CREATE TABLE IF NOT EXISTS entities (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+            type TEXT NOT NULL DEFAULT 'concept', description TEXT DEFAULT '',
+            aliases TEXT DEFAULT '[]', properties TEXT DEFAULT '{}',
+            importance REAL DEFAULT 0.5, freshness REAL DEFAULT 1.0,
+            last_mentioned TEXT DEFAULT (datetime('now')),
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')))''')
 
-    kconn.execute('''CREATE TABLE IF NOT EXISTS entities (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
-        type TEXT NOT NULL DEFAULT 'concept', description TEXT DEFAULT '',
-        aliases TEXT DEFAULT '[]', properties TEXT DEFAULT '{}',
-        importance REAL DEFAULT 0.5, freshness REAL DEFAULT 1.0,
-        last_mentioned TEXT DEFAULT (datetime('now')),
-        created_at TEXT DEFAULT (datetime('now')),
-        updated_at TEXT DEFAULT (datetime('now')))''')
+        # 迁移
+        cols = [r[1] for r in kconn.execute('PRAGMA table_info(entities)').fetchall()]
+        for col, ctype in [('description','TEXT'),('aliases','TEXT'),('properties','TEXT'),
+                            ('importance','REAL'),('freshness','REAL'),
+                            ('last_mentioned','TEXT'),('updated_at','TEXT')]:
+            if col not in cols:
+                kconn.execute(f'ALTER TABLE entities ADD COLUMN {col} {ctype}')
+                if col in ('importance','freshness'): kconn.execute(f'UPDATE entities SET {col}=0.5 WHERE {col} IS NULL')
+                elif col in ('last_mentioned','updated_at'): kconn.execute(f'UPDATE entities SET {col}=datetime(\'now\') WHERE {col} IS NULL')
+                elif col in ('aliases','properties'): kconn.execute(f'UPDATE entities SET {col}=\'[]\' WHERE {col} IS NULL')
+                else: kconn.execute(f'UPDATE entities SET {col}=\'\' WHERE {col} IS NULL')
+                print(f"   🔧 迁移: entities.{col}")
 
-    # 迁移
-    cols = [r[1] for r in kconn.execute('PRAGMA table_info(entities)').fetchall()]
-    for col, ctype in [('description','TEXT'),('aliases','TEXT'),('properties','TEXT'),
-                        ('importance','REAL'),('freshness','REAL'),
-                        ('last_mentioned','TEXT'),('updated_at','TEXT')]:
-        if col not in cols:
-            kconn.execute(f'ALTER TABLE entities ADD COLUMN {col} {ctype}')
-            if col in ('importance','freshness'): kconn.execute(f'UPDATE entities SET {col}=0.5 WHERE {col} IS NULL')
-            elif col in ('last_mentioned','updated_at'): kconn.execute(f'UPDATE entities SET {col}=datetime(\'now\') WHERE {col} IS NULL')
-            elif col in ('aliases','properties'): kconn.execute(f'UPDATE entities SET {col}=\'[]\' WHERE {col} IS NULL')
-            else: kconn.execute(f'UPDATE entities SET {col}=\'\' WHERE {col} IS NULL')
-            print(f"   🔧 迁移: entities.{col}")
+        kconn.execute('''CREATE TABLE IF NOT EXISTS relations (
+            id TEXT PRIMARY KEY, source_id TEXT NOT NULL, target_id TEXT NOT NULL,
+            type TEXT NOT NULL DEFAULT 'related', strength REAL DEFAULT 0.5,
+            evidence TEXT DEFAULT '[]', discovered_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (source_id) REFERENCES entities(id),
+            FOREIGN KEY (target_id) REFERENCES entities(id))''')
 
-    kconn.execute('''CREATE TABLE IF NOT EXISTS relations (
-        id TEXT PRIMARY KEY, source_id TEXT NOT NULL, target_id TEXT NOT NULL,
-        type TEXT NOT NULL DEFAULT 'related', strength REAL DEFAULT 0.5,
-        evidence TEXT DEFAULT '[]', discovered_at TEXT DEFAULT (datetime('now')),
-        FOREIGN KEY (source_id) REFERENCES entities(id),
-        FOREIGN KEY (target_id) REFERENCES entities(id))''')
+        rcols = [r[1] for r in kconn.execute('PRAGMA table_info(relations)').fetchall()]
+        for col, ctype in [('type','TEXT'),('strength','REAL'),('evidence','TEXT'),('discovered_at','TEXT')]:
+            if col not in rcols:
+                kconn.execute(f'ALTER TABLE relations ADD COLUMN {col} {ctype}')
+                if col == 'strength': kconn.execute(f'UPDATE relations SET {col}=0.5 WHERE {col} IS NULL')
+                elif col == 'discovered_at': kconn.execute(f'UPDATE relations SET {col}=datetime(\'now\') WHERE {col} IS NULL')
+                elif col == 'evidence': kconn.execute(f'UPDATE relations SET {col}=\'[]\' WHERE {col} IS NULL')
+                else: kconn.execute(f'UPDATE relations SET {col}=\'related\' WHERE {col} IS NULL')
 
-    rcols = [r[1] for r in kconn.execute('PRAGMA table_info(relations)').fetchall()]
-    for col, ctype in [('type','TEXT'),('strength','REAL'),('evidence','TEXT'),('discovered_at','TEXT')]:
-        if col not in rcols:
-            kconn.execute(f'ALTER TABLE relations ADD COLUMN {col} {ctype}')
-            if col == 'strength': kconn.execute(f'UPDATE relations SET {col}=0.5 WHERE {col} IS NULL')
-            elif col == 'discovered_at': kconn.execute(f'UPDATE relations SET {col}=datetime(\'now\') WHERE {col} IS NULL')
-            elif col == 'evidence': kconn.execute(f'UPDATE relations SET {col}=\'[]\' WHERE {col} IS NULL')
-            else: kconn.execute(f'UPDATE relations SET {col}=\'related\' WHERE {col} IS NULL')
+        existing = {name: eid for eid, name in kconn.execute('SELECT id, name FROM entities').fetchall()}
+        existing_names = set(existing.keys())
+        print(f"   现有实体: {len(existing_names)} 个")
 
-    existing = {name: eid for eid, name in kconn.execute('SELECT id, name FROM entities').fetchall()}
-    existing_names = set(existing.keys())
-    print(f"   现有实体: {len(existing_names)} 个")
+        added = updated = 0
+        entity_map = dict(existing)
+        for word, count in all_candidates.most_common():
+            if count < 2:
+                continue
+            if word not in existing_names:
+                eid = f"ent_{uuid.uuid4().hex[:8]}"
+                kconn.execute('INSERT INTO entities (id,name,type,importance,last_mentioned,updated_at) VALUES (?,?,?,?,datetime(\'now\'),datetime(\'now\'))',
+                    (eid, word, get_entity_type(word), min(1.0, count * 0.2)))
+                entity_map[word] = eid
+                existing_names.add(word)
+                added += 1
+            else:
+                kconn.execute('UPDATE entities SET last_mentioned=datetime(\'now\'), importance=MIN(1.0,importance+0.1), updated_at=datetime(\'now\') WHERE id=?',
+                    (entity_map[word],))
+                updated += 1
+        print(f"   新增: {added}, 更新: {updated}")
 
-    added = updated = 0
-    entity_map = dict(existing)
-    for word, count in all_candidates.most_common():
-        if count < 2:
-            continue
-        if word not in existing_names:
-            eid = f"ent_{uuid.uuid4().hex[:8]}"
-            kconn.execute('INSERT INTO entities (id,name,type,importance,last_mentioned,updated_at) VALUES (?,?,?,?,datetime(\'now\'),datetime(\'now\'))',
-                (eid, word, get_entity_type(word), min(1.0, count * 0.2)))
-            entity_map[word] = eid
-            existing_names.add(word)
-            added += 1
-        else:
-            kconn.execute('UPDATE entities SET last_mentioned=datetime(\'now\'), importance=MIN(1.0,importance+0.1), updated_at=datetime(\'now\') WHERE id=?',
-                (entity_map[word],))
-            updated += 1
-    print(f"   新增: {added}, 更新: {updated}")
+        # 关系：共现计数 + 阈值过滤
+        print("\n🔗 构建关系（共现 ≥ 2 次，最多 50 条）...")
+        cooccur: Counter = Counter()
+        name_to_id = entity_map
+        for text in all_texts:
+            ents = [e for e in name_to_id if e.lower() in text.lower()]
+            for i, e1 in enumerate(ents):
+                for e2 in ents[i+1:]:
+                    cooccur[tuple(sorted([name_to_id[e1], name_to_id[e2]]))] += 1
 
-    # 关系：共现计数 + 阈值过滤
-    print("\n🔗 构建关系（共现 ≥ 2 次，最多 50 条）...")
-    cooccur: Counter = Counter()
-    name_to_id = entity_map
-    for text in all_texts:
-        ents = [e for e in name_to_id if e.lower() in text.lower()]
-        for i, e1 in enumerate(ents):
-            for e2 in ents[i+1:]:
-                cooccur[tuple(sorted([name_to_id[e1], name_to_id[e2]]))] += 1
+        strong = [(p, c) for p, c in cooccur.most_common() if c >= 2][:50]
+        rel_added = 0
+        for (src, tgt), count in strong:
+            if kconn.execute('SELECT id FROM relations WHERE (source_id=? AND target_id=?) OR (source_id=? AND target_id=?)',
+                (src, tgt, tgt, src)).fetchone():
+                continue
+            kconn.execute('INSERT INTO relations (id,source_id,target_id,type,strength,discovered_at) VALUES (?,?,?,?,?,datetime(\'now\'))',
+                (f"rel_{uuid.uuid4().hex}", src, tgt, 'related', min(1.0, count * 0.3)))
+            rel_added += 1
+        print(f"   候选: {len(cooccur)}, 过阈: {len(strong)}, 新增: {rel_added}")
 
-    strong = [(p, c) for p, c in cooccur.most_common() if c >= 2][:50]
-    rel_added = 0
-    for (src, tgt), count in strong:
-        if kconn.execute('SELECT id FROM relations WHERE (source_id=? AND target_id=?) OR (source_id=? AND target_id=?)',
-            (src, tgt, tgt, src)).fetchone():
-            continue
-        kconn.execute('INSERT INTO relations (id,source_id,target_id,type,strength,discovered_at) VALUES (?,?,?,?,?,datetime(\'now\'))',
-            (f"rel_{uuid.uuid4().hex}", src, tgt, 'related', min(1.0, count * 0.3)))
-        rel_added += 1
-    print(f"   候选: {len(cooccur)}, 过阈: {len(strong)}, 新增: {rel_added}")
-
-    kconn.commit()
-    te = kconn.execute('SELECT COUNT(*) FROM entities').fetchone()[0]
-    tr = kconn.execute('SELECT COUNT(*) FROM relations').fetchone()[0]
-    kconn.close()
+        kconn.commit()
+        te = kconn.execute('SELECT COUNT(*) FROM entities').fetchone()[0]
+        tr = kconn.execute('SELECT COUNT(*) FROM relations').fetchone()[0]
+    finally:
+        kconn.close()
     print(f"\n✅ 完成 — 实体: {te}, 关系: {tr}")
 
 

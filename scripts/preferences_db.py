@@ -362,23 +362,29 @@ class PreferencesDB:
 def quick_search(agent_id: str, query: str) -> List[Dict]:
     """快速搜索"""
     db = PreferencesDB(agent_id)
-    results = db.search(query)
-    db.close()
-    return results
+    try:
+        results = db.search(query)
+        return results
+    finally:
+        db.close()
 
 def quick_stats(agent_id: str) -> Dict:
     """快速获取统计"""
     db = PreferencesDB(agent_id)
-    stats = db.get_stats()
-    db.close()
-    return stats
+    try:
+        stats = db.get_stats()
+        return stats
+    finally:
+        db.close()
 
 def quick_profile(agent_id: str) -> Dict:
     """快速获取用户画像"""
     db = PreferencesDB(agent_id)
-    profile = db.get_user_profile()
-    db.close()
-    return profile
+    try:
+        profile = db.get_user_profile()
+        return profile
+    finally:
+        db.close()
 
 # ────────────────────────────────────────────────
 # CLI 入口

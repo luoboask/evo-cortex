@@ -79,16 +79,17 @@ class UnifiedSearcher:
     def _search_memories(self, query: str, limit: int) -> list:
         """搜索会话记忆"""
         results = []
-        
+
+        conn = None
         try:
             conn = sqlite3.connect(str(self.config.db_path))
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            
+
             # FTS5 全文搜索
             cursor.execute("""
-                SELECT sm.*, 
-                       CASE 
+                SELECT sm.*,
+                       CASE
                            WHEN sm.content LIKE ? THEN 3
                            WHEN sm.content LIKE ? THEN 2
                            ELSE 1
@@ -98,7 +99,7 @@ class UnifiedSearcher:
                 ORDER BY sm.importance DESC, sm.created_at DESC
                 LIMIT ?
             """, (f'%{query}%', f'%{query.lower()}%', f'%{query}%', limit))
-            
+
             for row in cursor.fetchall():
                 results.append({
                     'type': 'memory',
@@ -111,27 +112,29 @@ class UnifiedSearcher:
                     'created_at': row['created_at'],
                     'relevance': row['relevance']
                 })
-            
-            conn.close()
-            
+
         except Exception as e:
             print(f"⚠️  搜索记忆失败：{e}", file=sys.stderr)
-        
+        finally:
+            if conn:
+                conn.close()
+
         return results
     
     def _search_preferences(self, query: str, limit: int) -> list:
         """搜索用户偏好"""
         results = []
-        
+
+        conn = None
         try:
             conn = sqlite3.connect(str(self.config.db_path))
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
-            
+
             # 简化查询（不关联 category 表）
             cursor.execute("""
                 SELECT *,
-                       CASE 
+                       CASE
                            WHEN text LIKE ? THEN 3
                            WHEN text LIKE ? THEN 2
                            ELSE 1
@@ -141,7 +144,7 @@ class UnifiedSearcher:
                 ORDER BY confidence DESC, created_at DESC
                 LIMIT ?
             """, (f'%{query}%', f'%{query.lower()}%', f'%{query}%', limit))
-            
+
             for row in cursor.fetchall():
                 results.append({
                     'type': 'preference',
@@ -154,12 +157,13 @@ class UnifiedSearcher:
                     'created_at': row['created_at'],
                     'relevance': row['relevance']
                 })
-            
-            conn.close()
-            
+
         except Exception as e:
             print(f"⚠️  搜索偏好失败：{e}", file=sys.stderr)
-        
+        finally:
+            if conn:
+                conn.close()
+
         return results
     
     def _search_knowledge(self, query: str, limit: int) -> list:

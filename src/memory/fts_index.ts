@@ -43,7 +43,6 @@ export class FtsIndex {
   /** 初始化数据库和 FTS5 虚拟表 */
   init(): void {
     if (this.initialized) return;
-    const require = createRequire(import.meta.url);
     const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
     this.db = new sqlite3.Database(this.dbPath);
     this.db.serialize(() => {
