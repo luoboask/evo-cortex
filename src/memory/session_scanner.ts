@@ -197,7 +197,6 @@ export class SessionScanner {
       }
 
       let consolidated = 0;
-      const lazyHub = await this.getMemoryHub();
 
       for (const [entryType, typeEntries] of byType) {
         // 去重：去除内容高度相似的条目
@@ -210,14 +209,11 @@ export class SessionScanner {
 
         for (const m of merged) {
           // 写入长期记忆
-          await lazyHub.add({
+          await this.insertToMemoryDb({
+            type: entryType,
             content: m.content,
-            type: entryType as any,
-            timestamp: m.timestamp,
-            metadata: {
-              source: 'working_memory_consolidation',
-              originalCount: m.originalCount
-            }
+            source: 'working_memory_consolidation',
+            sourceRef: `consolidated_${m.originalCount}`,
           });
 
           // 提取偏好（仅对 conversation 类型）
@@ -617,7 +613,61 @@ export class SessionScanner {
 
   // ========== 私有方法 ==========
 
-  private async getMemoryHub(): Promise<MemoryHub> {
+  /**
+   * Insert a working_memory entry directly into memory.db
+   */
+  private async insertToMemoryDb(entry: {
+    type: string;
+    title?: string;
+    content: string;
+    source: string;
+    sourceRef?: string;
+  }): Promise<void> {
+    const dataDir = getDataDir(this.ctx);
+    const dbPath = path.join(dataDir, 'memory.db');
+    if (!fs.existsSync(dbPath)) return;
+
+    const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
+    const db = new sqlite3.Database(dbPath);
+
+    try {
+      const importance = this.scoreMemoryImportance(entry);
+      const tags = JSON.stringify([]);
+      const now = new Date().toISOString();
+      const id = `wm_session_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+
+      await new Promise<void>((resolve, reject) => {
+        db.run(
+          `INSERT INTO working_memory (id, type, title, content, importance, tags, source, source_ref, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          [id, entry.type, entry.title || '', entry.content, importance, tags, entry.source, entry.sourceRef || null, now],
+          (err: Error | null) => err ? reject(err) : resolve()
+        );
+      });
+    } catch (err) {
+      this.logger.error('Insert to memory.db failed', err);
+    } finally {
+      db.close();
+    }
+  }
+
+  /**
+   * Score memory importance for session scan entries
+   */
+  private scoreMemoryImportance(entry: { type: string; content: string }): number {
+    let score = 3.0;
+    if (entry.type === 'decision') score += 3;
+    else if (entry.type === 'insight') score += 2;
+    else if (entry.type === 'session') score += 0.5;
+    const keyWords = ['重要', '关键', '必须', '记住', '决定', '方案'];
+    if (keyWords.some(kw => entry.content.includes(kw))) score += 1.5;
+    return Math.min(score, 10);
+  }
+
+  /**
+   * @deprecated Use insertToMemoryDb instead. Kept for backwards compatibility only.
+   */
+  protected async getMemoryHub(): Promise<MemoryHub> {
     if (!this.memoryHub) {
       this.memoryHub = new MemoryHub(this.ctx);
     }
@@ -715,8 +765,6 @@ export class SessionScanner {
       const newMessages = messages.slice(startIndex);
       if (newMessages.length === 0) return result;
 
-      const lazyHub = await this.getMemoryHub();
-
       // 合并为一条会话摘要
       const userMsgs = newMessages.filter(m => m.type === 'user');
       const assistantMsgs = newMessages.filter(m => m.type === 'assistant');
@@ -725,19 +773,13 @@ export class SessionScanner {
 
       // 判断存储层级
       const promotion = this.shouldPromote(newMessages, session);
-      const memoryType = promotion ? 'long_term' : 'working_session';
 
-      await lazyHub.add({
+      await this.insertToMemoryDb({
+        type: promotion ? 'long_term' : 'working_session',
+        title: `Session: ${session.id}`,
         content: summary,
-        type: memoryType as any,
-        timestamp: newMessages[0].timestamp || new Date().toISOString(),
-        metadata: {
-          sessionId: session.id,
-          source: 'session_scan',
-          userMessageCount: userMsgs.length,
-          assistantMessageCount: assistantMsgs.length,
-          promoted: promotion
-        }
+        source: 'session_scan',
+        sourceRef: session.id,
       });
 
       result.saved = 1;

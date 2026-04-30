@@ -75,6 +75,7 @@ export class MemoryHub {
   private lastEmbeddingAttempt: number = 0;
   private embeddingRetryInterval: number = 5 * 60 * 1000;
   private indexBuilder?: IndexBuilder; // 可选的 FTS+向量索引
+  private loadPromise: Promise<void>;
   private logger = getLogger({ component: 'MemoryHub' });
 
   constructor(ctx: PluginContext, config?: Partial<MemoryConfig>, embeddingConfig?: Partial<EmbeddingConfig>, retention?: Partial<RetentionPolicy>) {
@@ -115,7 +116,7 @@ export class MemoryHub {
     this.semanticSearch = new SemanticSearch(embeddingFunc, 5000);
     this.ragEval = new RagEvaluator(ctx);
     // 异步加载，不阻塞构造函数
-    this.load().catch(err => this.logger.error('Load error', err));
+    this.loadPromise = this.load().catch(err => this.logger.error('Load error', err));
   }
 
   // ========== 写入 ==========
@@ -157,6 +158,7 @@ export class MemoryHub {
    * 使用高层结果引导低层搜索范围，避免全量扫描
    */
   async search(query: string, topK?: number): Promise<MemorySearchResult[]> {
+    await this.loadPromise;
     const startTime = Date.now();
     const limit = topK || this.config.top_k;
     if (this.memories.length === 0) return [];
@@ -500,10 +502,12 @@ export class MemoryHub {
   // ========== 基础操作 ==========
 
   async getRecent(limit: number = 10): Promise<MemoryEntry[]> {
+    await this.loadPromise;
     return [...this.memories].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()).slice(0, limit);
   }
 
   async delete(id: string): Promise<boolean> {
+    await this.loadPromise;
     const idx = this.memories.findIndex(m => m.id === id);
     if (idx !== -1) {
       this.memories.splice(idx, 1);

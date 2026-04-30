@@ -17,6 +17,7 @@ import { validateConfig } from "./utils/config-validator";
 import { getCache } from "./utils/cache";
 import { runHealthCheck, formatHealthReport } from "./tools/health-check";
 import { checkAndPrompt, markAsConfigured, isCronConfigured } from "./utils/cron-auto-setup";
+import { EvolutionScheduler } from "./evolution/scheduler";
 
 // Agent-isolated MemoryIndexer singletons: one per agent
 const sharedMemoryIndexers = new Map<string, MemoryIndexer>();
@@ -173,6 +174,16 @@ const plugin = {
         sharedScanners.set(agentId, new SessionScanner(ctx));
       }
       return sharedScanners.get(agentId)!;
+    }
+
+    // Agent-isolated EvolutionScheduler singletons
+    const sharedSchedulers = new Map<string, EvolutionScheduler>();
+    function getOrCreateScheduler(agentId: string, workspaceDir: string): EvolutionScheduler {
+      if (!sharedSchedulers.has(agentId)) {
+        const ctx = { agentId, workspaceDir, storageBaseDir: process.env.HOME || '/tmp' } as any;
+        sharedSchedulers.set(agentId, new EvolutionScheduler(ctx, config.evolution));
+      }
+      return sharedSchedulers.get(agentId)!;
     }
 
     // ========== 注册工具 ==========
@@ -879,6 +890,87 @@ const plugin = {
       };
     });
 
+    // 19. 分形思考工具（cron 调用）
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'fractal_thinking',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "fractal_thinking",
+        description: "执行分形思考：分析近期事件模式，生成元规则",
+        parameters: Type.Object({}),
+        async execute(_id: string) {
+          try {
+            const scheduler = getOrCreateScheduler(pluginCtx.agentId, pluginCtx.workspaceDir);
+            await scheduler.runFractalThinking();
+            toolLogger.info('Fractal thinking completed');
+            return { content: [{ type: "text" as const, text: '分形思考已完成，请查看元规则文件' }] };
+          } catch (error: any) {
+            toolLogger.error('Fractal thinking failed', error);
+            return { content: [{ type: "text" as const, text: `分形思考失败: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
+    // 20. 领域整理工具（cron 调用）
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'domain_organize',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "domain_organize",
+        description: "整理领域知识：提取、组织知识图谱",
+        parameters: Type.Object({}),
+        async execute(_id: string) {
+          try {
+            const scheduler = getOrCreateScheduler(pluginCtx.agentId, pluginCtx.workspaceDir);
+            await scheduler.organizeDomainKnowledge();
+            toolLogger.info('Domain organization completed');
+            return { content: [{ type: "text" as const, text: '领域知识整理已完成' }] };
+          } catch (error: any) {
+            toolLogger.error('Domain organization failed', error);
+            return { content: [{ type: "text" as const, text: `领域知识整理失败: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
+    // 21. 领域审查工具（cron 调用）
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'domain_review',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "domain_review",
+        description: "审查领域知识：验证规则、检查一致性",
+        parameters: Type.Object({}),
+        async execute(_id: string) {
+          try {
+            const scheduler = getOrCreateScheduler(pluginCtx.agentId, pluginCtx.workspaceDir);
+            await scheduler.reviewDomainKnowledge();
+            toolLogger.info('Domain review completed');
+            return { content: [{ type: "text" as const, text: '领域知识审查已完成' }] };
+          } catch (error: any) {
+            toolLogger.error('Domain review failed', error);
+            return { content: [{ type: "text" as const, text: `领域知识审查失败: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
     // ========== 统一实例缓存（MemorySystem 为主，KnowledgeSystem 共享）==========
     const msCache = new Map<string, MemorySystem>();
     const ksCache = new Map<string, KnowledgeSystem>();
@@ -1281,21 +1373,12 @@ const plugin = {
             if (lastUserMsg && lastUserMsg.length > 5) {
               const prefs = SessionScanner.extractFromText(lastUserMsg);
               if (prefs.length > 0) {
-                const dataDir = getDataDir({ agentId } as any);
-                const kgPath = path.join(dataDir, 'knowledge.db');
-                if (fs.existsSync(kgPath)) {
-                  const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
-                  const db = new sqlite3.Database(kgPath);
+                const { ks } = getOrCreateMemory(agentId, workspaceDir);
+                if (ks) {
                   for (const pref of prefs) {
-                    const prefId = `${pref.category}:${pref.key}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
-                    db.run(
-                      `INSERT OR REPLACE INTO preferences (id, category, value, confidence, source, created_at, updated_at)
-                       VALUES (?, ?, ?, ?, 'agent_end', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
-                      [prefId, pref.category, pref.value, pref.confidence]
-                    );
+                    await ks.savePreference(pref);
                   }
-                  db.close();
-                  logger.info(`agent_end: extracted ${prefs.length} pref(s) from current message: ${prefs.map(p => `[${p.category}] ${p.value}`).join(', ')}`);
+                  logger.info(`agent_end: saved ${prefs.length} pref(s) via KnowledgeSystem: ${prefs.map(p => `[${p.category}] ${p.value}`).join(', ')}`);
                 }
               }
             }

@@ -725,6 +725,28 @@ export class KnowledgeSystem {
     };
   }
 
+  /**
+   * 保存用户偏好到 knowledge.db
+   */
+  async savePreference(pref: {
+    category: string;
+    key: string;
+    value: string;
+    confidence: number;
+  }): Promise<void> {
+    await this.ensureInit();
+
+    const prefId = `${pref.category}:${pref.key}:${Date.now()}`;
+    return new Promise<void>((resolve, reject) => {
+      this.db.run(
+        `INSERT OR REPLACE INTO preferences (id, category, value, confidence, source, created_at, updated_at)
+         VALUES (?, ?, ?, ?, 'knowledge_system', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
+        [prefId, pref.category, pref.value, pref.confidence],
+        (err: Error | null) => err ? reject(err) : resolve()
+      );
+    });
+  }
+
   // ========== 统计信息 ==========
 
   async getStats(): Promise<{
