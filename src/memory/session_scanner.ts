@@ -251,20 +251,30 @@ export class SessionScanner {
   }
 
   /**
-   * 去重：去除内容相似度高的条目
+   * 去重：先做 hash 预过滤，再 O(n^2) 相似度检查
    */
   private deduplicateEntries(entries: WorkingMemoryEntry[]): WorkingMemoryEntry[] {
     if (entries.length <= 1) return entries;
 
-    const result: WorkingMemoryEntry[] = [];
+    // Step 1: Hash-based dedup of normalized content (O(n))
+    const hashSeen = new Map<string, WorkingMemoryEntry>();
+    const candidates: WorkingMemoryEntry[] = [];
     for (const entry of entries) {
+      const normalized = entry.content.toLowerCase().replace(/\s+/g, ' ').trim().slice(0, 200);
+      if (hashSeen.has(normalized)) continue;
+      hashSeen.set(normalized, entry);
+      candidates.push(entry);
+    }
+    if (candidates.length <= 1) return candidates;
+
+    // Step 2: O(n^2) similarity only on hash-deduped candidates
+    const result: WorkingMemoryEntry[] = [];
+    for (const entry of candidates) {
       const isDuplicate = result.some(existing => {
-        // 简单的相似度检查：如果一条包含另一条的大部分内容，视为重复
         const a = entry.content.toLowerCase();
         const b = existing.content.toLowerCase();
         if (a.includes(b) || b.includes(a)) return true;
 
-        // Jaccard 相似度（按词）
         const wordsA = new Set(a.split(/\s+/));
         const wordsB = new Set(b.split(/\s+/));
         const intersection = new Set([...wordsA].filter(w => wordsB.has(w)));

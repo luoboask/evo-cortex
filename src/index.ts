@@ -163,6 +163,16 @@ const plugin = {
       }
     };
 
+    // Agent-isolated SessionScanner singletons: one per agent
+    const sharedScanners = new Map<string, SessionScanner>();
+    function getOrCreateScanner(agentId: string, workspaceDir: string): SessionScanner {
+      if (!sharedScanners.has(agentId)) {
+        const ctx = { agentId, workspaceDir, storageBaseDir: process.env.HOME || '/tmp' } as any;
+        sharedScanners.set(agentId, new SessionScanner(ctx));
+      }
+      return sharedScanners.get(agentId)!;
+    }
+
     // ========== 注册工具 ==========
 
     // 1. 记忆搜索工具
@@ -1269,10 +1279,9 @@ const plugin = {
             logger.debug(`agent_end: preference extraction skipped: ${err.message}`);
           }
 
-          // --- session scanner：每次 agent_end 都跑，fire-and-forget ---
+          // --- session scanner：使用缓存实例，fire-and-forget ---
           try {
-            const pluginCtx = buildPluginContext(ctx, api);
-            const scanner = new SessionScanner(pluginCtx);
+            const scanner = getOrCreateScanner(agentId, workspaceDir);
             scanner.scan().then(r => {
               if (r.newSessions > 0 || r.preferencesExtracted > 0 || r.promoted > 0) {
                 logger.info(`session scan: ${r.scanned} scanned, ${r.newSessions} new, ${r.preferencesExtracted} prefs, ${r.promoted} promoted`);

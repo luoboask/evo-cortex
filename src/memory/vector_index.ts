@@ -135,6 +135,25 @@ export class VectorIndexStore {
       );
     });
 
+    // Batch-fetch all metadata in a single query (fix N+1)
+    const ids = rows.map(r => r.id);
+    const metadataMap = new Map<string, Record<string, any>>();
+    if (ids.length > 0) {
+      const placeholders = ids.map(() => '?').join(',');
+      const metaRows = await new Promise<any[]>((res, rej) => {
+        this.db.all(
+          `SELECT vector_id, metadata_json FROM vector_metadata WHERE vector_id IN (${placeholders})`,
+          ids,
+          (err: Error | null, mr: any[]) => { err ? rej(err) : res(mr || []); }
+        );
+      });
+      for (const mr of metaRows) {
+        try {
+          if (mr.metadata_json) metadataMap.set(mr.vector_id, JSON.parse(mr.metadata_json));
+        } catch { /* ignore */ }
+      }
+    }
+
     // 内存中计算余弦相似度
     const results: VectorSearchResult[] = [];
     for (const row of rows) {
@@ -142,25 +161,11 @@ export class VectorIndexStore {
       if (stored.length !== dims) continue;
 
       const score = this.cosineSimilarity(queryEmbedding, stored);
-      let metadata: Record<string, any> | undefined;
-      try {
-        const metaRows = await new Promise<any[]>((res, rej) => {
-          this.db.get(
-            `SELECT metadata_json FROM vector_metadata WHERE vector_id = ?`,
-            [row.id],
-            (err: Error | null, mr: any) => { err ? rej(err) : res(mr ? [mr] : []); }
-          );
-        });
-        if (metaRows.length > 0 && metaRows[0].metadata_json) {
-          metadata = JSON.parse(metaRows[0].metadata_json);
-        }
-      } catch { /* ignore metadata parse error */ }
-
       results.push({
         id: row.id,
         content: row.content,
         score,
-        metadata
+        metadata: metadataMap.get(row.id)
       });
     }
 

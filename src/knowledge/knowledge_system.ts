@@ -139,6 +139,16 @@ const STOP_WORDS = new Set([
   'behind', 'beyond', 'below', 'above', 'here', 'there',
 ]);
 
+// 中文停用词（实体提取时排除）
+const CHINESE_STOP_WORDS = new Set([
+  '我们可以', '他们', '这个', '那个', '这些', '那些', '因为', '所以',
+  '如果', '但是', '虽然', '然而', '因此', '然后', '接着', '首先',
+  '最后', '总之', '大概', '可能', '应该', '必须', '需要', '可以',
+  '现在', '已经', '正在', '经常', '偶尔', '总是', '通常', '一般',
+  '自己', '自己', '人家', '大家', '我们', '你们', '他们',
+  '这里', '那里', '哪里', '什么', '怎么', '如何', '为什么', '多少',
+]);
+
 // ========== KnowledgeSystem ==========
 
 export class KnowledgeSystem {
@@ -355,15 +365,8 @@ export class KnowledgeSystem {
     // 4. 中文关键词提取（4-20 字连续中文，排除常见停用词）
     const chineseMatches = content.match(/[\u4e00-\u9fff]{4,20}/g);
     if (chineseMatches) {
-      const chineseStopWords = new Set([
-        '我们可以', '他们', '这个', '那个', '这些', '那些', '因为', '所以',
-        '如果', '但是', '虽然', '然而', '因此', '然后', '接着', '首先',
-        '最后', '总之', '大概', '可能', '应该', '必须', '需要', '可以',
-        '能够', '已经', '正在', '将会', '曾经', '现在', '未来', '过去',
-        '这里', '那里', '哪里', '什么', '怎么', '如何', '为什么', '多少',
-      ]);
       for (const match of chineseMatches) {
-        if (chineseStopWords.has(match)) continue;
+        if (CHINESE_STOP_WORDS.has(match)) continue;
         const key = match;
         if (!entities.has(key)) {
           entities.set(key, { name: match, type: 'concept', role: 'context' });
@@ -450,51 +453,50 @@ export class KnowledgeSystem {
 
     const now = new Date().toISOString();
 
+    // Build all pairs and batch-fetch existing relations
+    const pairs: Array<{ s: string; t: string }> = [];
     for (let i = 0; i < entityIds.length; i++) {
       for (let j = i + 1; j < entityIds.length; j++) {
-        const sourceId = entityIds[i];
-        const targetId = entityIds[j];
-
-        // 确保 sourceId < targetId（无向图）
-        const [s, t] = sourceId < targetId ? [sourceId, targetId] : [targetId, sourceId];
-
-        const existing = await this.getRelation(s, t);
-        if (existing) {
-          // 增强已有关系
-          const newStrength = Math.min(existing.strength + 0.1, 1.0);
-          const evidence = JSON.parse(existing.evidence || '[]');
-          if (!evidence.includes(ltmId)) {
-            evidence.push(ltmId);
-          }
-          await this.runAsync(
-            `UPDATE relations SET strength = ?, evidence = ?, last_used = ? WHERE id = ?`,
-            [newStrength, JSON.stringify(evidence), now, existing.id]
-          );
-        } else {
-          // 插入新关系
-          const relId = `rel_${s}_${t}_${Date.now()}`;
-          await this.runAsync(
-            `INSERT INTO relations (id, source_id, target_id, type, strength, evidence, created_at)
-             VALUES (?, ?, ?, 'co_occurs', 0.3, ?, ?)`,
-            [relId, s, t, JSON.stringify([ltmId]), now]
-          );
-        }
+        const [s, t] = entityIds[i] < entityIds[j] ? [entityIds[i], entityIds[j]] : [entityIds[j], entityIds[i]];
+        pairs.push({ s, t });
       }
     }
-  }
 
-  /** 获取两个实体间的关系 */
-  private getRelation(sourceId: string, targetId: string): Promise<any> {
-    return new Promise((resolve) => {
-      this.db.get(
-        `SELECT * FROM relations WHERE source_id = ? AND target_id = ?`,
-        [sourceId, targetId],
-        (err: Error | null, row: any) => {
-          if (err || !row) resolve(null);
-          else resolve(row);
-        }
+    // Batch fetch all existing relations in a single query
+    const placeholders = pairs.map(() => '(?, ?)').join(' OR ');
+    const params = pairs.flatMap(p => [p.s, p.t]);
+    const existingRows = await new Promise<any[]>((resolve, reject) => {
+      this.db.all(
+        `SELECT id, source_id, target_id, strength, evidence FROM relations WHERE ${placeholders}`,
+        params,
+        (err: Error | null, rows: any[]) => { err ? reject(err) : resolve(rows || []); }
       );
     });
+    const existingMap = new Map<string, any>();
+    for (const row of existingRows) {
+      existingMap.set(`${row.source_id}:${row.target_id}`, row);
+    }
+
+    // Apply updates/inserts
+    for (const pair of pairs) {
+      const existing = existingMap.get(`${pair.s}:${pair.t}`);
+      if (existing) {
+        const newStrength = Math.min(existing.strength + 0.1, 1.0);
+        const evidence = JSON.parse(existing.evidence || '[]');
+        if (!evidence.includes(ltmId)) evidence.push(ltmId);
+        await this.runAsync(
+          `UPDATE relations SET strength = ?, evidence = ?, last_used = ? WHERE id = ?`,
+          [newStrength, JSON.stringify(evidence), now, existing.id]
+        );
+      } else {
+        const relId = `rel_${pair.s}_${pair.t}_${Date.now()}`;
+        await this.runAsync(
+          `INSERT INTO relations (id, source_id, target_id, type, strength, evidence, created_at)
+           VALUES (?, ?, ?, 'co_occurs', 0.3, ?, ?)`,
+          [relId, pair.s, pair.t, JSON.stringify([ltmId]), now]
+        );
+      }
+    }
   }
 
   // ========== 规则评估 ==========
@@ -681,9 +683,9 @@ export class KnowledgeSystem {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
     const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString();
 
-    // 实体衰减
+    // 实体衰减：高重要性实体衰减更慢（importance=10 衰减因子 0.99，importance=1 衰减因子 0.95）
     await this.runAsync(
-      `UPDATE entities SET importance = MAX(importance * 0.95, 0.01) WHERE last_mentioned < ? OR last_mentioned IS NULL`,
+      `UPDATE entities SET importance = MAX(importance * (1.0 - 0.05 * (1.0 - importance / 10.0)), 0.01) WHERE last_mentioned < ? OR last_mentioned IS NULL`,
       [thirtyDaysAgo]
     );
 

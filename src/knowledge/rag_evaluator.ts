@@ -209,10 +209,11 @@ export class RagEvaluator {
         const allLayers: TuningParams['searchLayers'] = ['monthly', 'weekly', 'daily', 'session'];
         const missingLayers = allLayers.filter(l => !this.currentParams.searchLayers.includes(l));
         if (missingLayers.length > 0) {
+          const oldLayers = [...this.currentParams.searchLayers];
           this.currentParams.searchLayers.push(missingLayers[0]);
           changes.push({
             param: 'searchLayers',
-            oldValue: this.currentParams.searchLayers.filter(l => l !== missingLayers[0]),
+            oldValue: oldLayers,
             newValue: [...this.currentParams.searchLayers],
             reason: `覆盖度过低，添加 ${missingLayers[0]} 层`,
             timestamp: new Date().toISOString(),

@@ -133,13 +133,17 @@ export class Cache<K = string, V = any> {
 
   private evict(percentage: number): void {
     const toRemove = Math.floor(this.cache.size * percentage);
-    const entries = Array.from(this.cache.entries());
-    
-    // 按时间排序，删除最旧的
-    entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
-    
-    for (let i = 0; i < toRemove && i < entries.length; i++) {
-      this.cache.delete(entries[i][0]);
+    if (toRemove <= 0) return;
+
+    // Single-pass: collect keys sorted by timestamp
+    const keysWithTime: Array<[K, number]> = [];
+    for (const [key, entry] of this.cache) {
+      keysWithTime.push([key, entry.timestamp]);
+    }
+    keysWithTime.sort((a, b) => a[1] - b[1]);
+
+    for (let i = 0; i < toRemove && i < keysWithTime.length; i++) {
+      this.cache.delete(keysWithTime[i][0]);
     }
   }
 }

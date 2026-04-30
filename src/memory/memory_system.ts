@@ -164,8 +164,10 @@ export class MemorySystem {
           this.db.run(`CREATE INDEX IF NOT EXISTS idx_wm_importance ON working_memory(importance DESC)`, () => {});
           this.db.run(`CREATE INDEX IF NOT EXISTS idx_ltm_importance ON long_term_memory(importance DESC)`, () => {});
           this.db.run(`CREATE INDEX IF NOT EXISTS idx_ltm_recall ON long_term_memory(recalled_at)`, () => {
-            this.initialized = true;
-            resolve();
+            this.db.run(`CREATE INDEX IF NOT EXISTS idx_wm_created ON working_memory(created_at DESC)`, () => {
+              this.initialized = true;
+              resolve();
+            });
           });
         });
       });

@@ -36,6 +36,7 @@ export class MemoryIndexer {
   private ctx: PluginContext;
   private indexDir: string;
   private documents: Document[] = [];
+  private pathToIndex = new Map<string, number>();
   private fileState: FileState = {};
   private initialized: boolean = false;
 
@@ -60,6 +61,7 @@ export class MemoryIndexer {
     if (fs.existsSync(indexFile)) {
       try {
         this.documents = JSON.parse(fs.readFileSync(indexFile, 'utf8'));
+        this.documents.forEach((doc, i) => this.pathToIndex.set(doc.path, i));
       } catch {
         this.documents = [];
       }
@@ -80,15 +82,16 @@ export class MemoryIndexer {
   }
 
   /**
-   * 索引单个文档
+   * 索引单个文档（不立即保存，需调用 saveIndex）
    */
   indexDocument(doc: Document): void {
     if (!this.initialized) this.init();
 
-    const existingIndex = this.documents.findIndex(d => d.path === doc.path);
-    if (existingIndex !== -1) {
+    const existingIndex = this.pathToIndex.get(doc.path);
+    if (existingIndex !== undefined) {
       this.documents[existingIndex] = doc;
     } else {
+      this.pathToIndex.set(doc.path, this.documents.length);
       this.documents.push(doc);
     }
 
@@ -97,8 +100,6 @@ export class MemoryIndexer {
       mtime: doc.mtime,
       indexedAt: new Date().toISOString()
     };
-
-    this.saveIndex();
   }
 
   /**
@@ -108,6 +109,7 @@ export class MemoryIndexer {
     for (const doc of docs) {
       this.indexDocument(doc);
     }
+    this.saveIndex();
     console.log(`[MemoryIndexer] Indexed ${docs.length} documents`);
   }
 
@@ -197,9 +199,13 @@ export class MemoryIndexer {
    * 删除文档
    */
   removeDocument(docPath: string): boolean {
-    const index = this.documents.findIndex(d => d.path === docPath);
-    if (index !== -1) {
+    const index = this.pathToIndex.get(docPath);
+    if (index !== undefined) {
       this.documents.splice(index, 1);
+      this.pathToIndex.delete(docPath);
+      // Rebuild map after splice
+      this.pathToIndex.clear();
+      this.documents.forEach((doc, i) => this.pathToIndex.set(doc.path, i));
       delete this.fileState[docPath];
       this.saveIndex();
       return true;
