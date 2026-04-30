@@ -115,7 +115,10 @@
     { "name": "consolidate_memory", "description": "将工作记忆晋升到长期记忆，并触发知识图谱更新" },
     { "name": "memory_stats", "description": "查看记忆系统统计信息（工作记忆、长期记忆、实体、关系、规则）" },
     { "name": "decay_memory", "description": "对知识图谱中的实体和关系执行衰减更新" },
-    { "name": "validate_rules", "description": "验证知识图谱中的规则：标记过时和核心规则" }
+    { "name": "validate_rules", "description": "验证知识图谱中的规则：标记过时和核心规则" },
+    { "name": "fractal_thinking", "description": "执行分形思考：分析近期记忆模式，生成元规则" },
+    { "name": "domain_organize", "description": "整理领域知识：提取、组织知识图谱" },
+    { "name": "domain_review", "description": "审查领域知识：验证规则、检查一致性" }
   ],
   "hooks": [
     "message_received",

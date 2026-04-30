@@ -29,6 +29,7 @@ const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
 // ========== 类型定义 ==========
 
 export interface MemoryEntry {
+  id?: string;
   type: 'conversation' | 'decision' | 'bugfix' | 'insight' | 'preference' | 'error' | 'observation';
   title?: string;
   content: string;
@@ -36,6 +37,7 @@ export interface MemoryEntry {
   sourceRef?: string;
   tags?: string[];
   importance?: number; // 调用方可显式指定 (0-10)，覆盖自动评分
+  timestamp?: string;
 }
 
 export interface SearchResult {
@@ -653,19 +655,29 @@ export class MemorySystem {
     if (!this.backupEnabled) return;
     try {
       const now = new Date();
-      const dateStr = now.toISOString().split('T')[0];
+      const timestamp = entry.timestamp || now.toISOString();
+      const dateStr = timestamp.split('T')[0];
+      const id = entry.id || `wm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       const memoryDir = this.storageDir;
       if (!fs.existsSync(memoryDir)) {
         fs.mkdirSync(memoryDir, { recursive: true });
       }
       const dailyFile = path.join(memoryDir, `${dateStr}.md`);
 
-      let content = '';
-      if (fs.existsSync(dailyFile)) {
-        content = fs.readFileSync(dailyFile, 'utf-8');
-      }
+      const entryBlock = [
+        '---',
+        `id: ${id}`,
+        `type: ${entry.type}`,
+        `timestamp: ${timestamp}`,
+        `## ${entry.title || entry.type}`,
+        '',
+        entry.content,
+        '---',
+        '',
+      ].join('\n');
 
-      const entryBlock = `\n### ${entry.title || entry.type} (${now.toISOString()})\n\n${entry.content}\n\n`;
+      // Check for duplicate before appending
+      const content = fs.existsSync(dailyFile) ? fs.readFileSync(dailyFile, 'utf-8') : '';
       if (!content.includes(entry.content.slice(0, 50))) {
         fs.appendFileSync(dailyFile, entryBlock, 'utf-8');
       }

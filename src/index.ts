@@ -261,7 +261,11 @@ const plugin = {
         async execute(_id: string, params: any) {
           try {
             toolLogger.debug(`Searching knowledge: "${params.query}"${params.domain ? ` (domain: ${params.domain})` : ''}`);
-            const results = await ks.searchEntities(params.query);
+            let results = await ks.searchEntities(params.query);
+            // Apply domain filter if specified
+            if (params.domain) {
+              results = results.filter((r: any) => r.entity?.type === params.domain);
+            }
             toolLogger.info(`Found ${results.length} results`);
 
             return {
