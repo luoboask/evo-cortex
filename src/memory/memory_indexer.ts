@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PluginContext, getDataDir } from '../utils/plugin-context';
 import { IndexBuilder } from './index_builder';
+import { getLogger } from '../utils/logger';
 
 export interface Document {
   id: string;
@@ -39,6 +40,7 @@ export class MemoryIndexer {
   private pathToIndex = new Map<string, number>();
   private fileState: FileState = {};
   private initialized: boolean = false;
+  private logger = getLogger({ component: 'MemoryIndexer' });
 
   constructor(ctx: PluginContext) {
     this.ctx = ctx;
@@ -78,7 +80,7 @@ export class MemoryIndexer {
     }
 
     this.initialized = true;
-    console.log(`[MemoryIndexer] Initialized with ${this.documents.length} documents for agent ${this.ctx.agentId}`);
+    this.logger.info(`Initialized with ${this.documents.length} documents for agent ${this.ctx.agentId}`);
   }
 
   /**
@@ -110,7 +112,7 @@ export class MemoryIndexer {
       this.indexDocument(doc);
     }
     this.saveIndex();
-    console.log(`[MemoryIndexer] Indexed ${docs.length} documents`);
+    this.logger.info(`Indexed ${docs.length} documents`);
   }
 
   /**
@@ -118,7 +120,7 @@ export class MemoryIndexer {
    */
   scanDirectory(dirPath: string, pattern?: RegExp): Document[] {
     if (!fs.existsSync(dirPath)) {
-      console.log(`[MemoryIndexer] Directory not found: ${dirPath}`);
+      this.logger.info(`Directory not found: ${dirPath}`);
       return [];
     }
 
@@ -220,7 +222,7 @@ export class MemoryIndexer {
     this.documents = [];
     this.fileState = {};
     this.saveIndex();
-    console.log('[MemoryIndexer] Cleared all indexes');
+    this.logger.info('Cleared all indexes');
   }
 
   // ========== 私有方法 ==========
@@ -236,7 +238,7 @@ export class MemoryIndexer {
       const stateFile = path.join(this.indexDir, 'file_state.json');
       fs.writeFileSync(stateFile, JSON.stringify(this.fileState, null, 2), 'utf8');
     } catch (error) {
-      console.error('[MemoryIndexer] Save index error:', error);
+      this.logger.error('Save index error', error);
     }
   }
 }

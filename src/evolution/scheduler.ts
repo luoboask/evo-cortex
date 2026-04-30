@@ -13,6 +13,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import { PluginContext, getEvolutionStorageDir, getKnowledgeStorageDir } from "../utils/plugin-context";
+import { getLogger } from "../utils/logger";
 
 export interface EvolutionConfig {
   enabled: boolean;
@@ -32,6 +33,7 @@ interface MetaRule {
 export class EvolutionScheduler {
   private ctx: PluginContext;
   private storageDir: string;
+  private logger = getLogger({ component: 'EvolutionScheduler' });
   private recentEvents: Array<{ timestamp: string; content: string }> = [];
 
   constructor(ctx: PluginContext, _config?: Partial<EvolutionConfig>) {
@@ -41,22 +43,22 @@ export class EvolutionScheduler {
     this.storageDir = getEvolutionStorageDir(ctx);
     this.ensureDirectory(this.storageDir);
 
-    console.log(`[EvolutionScheduler] Initialized for agent: ${ctx.agentId}, storage: ${this.storageDir}`);
+    this.logger.info(`Initialized for agent: ${ctx.agentId}, storage: ${this.storageDir}`);
   }
 
   /**
    * 执行分形思考
    */
   async runFractalThinking(): Promise<void> {
-    console.log(`[EvolutionScheduler] Running fractal thinking for agent ${this.ctx.agentId}`);
-    
+    this.logger.info(`Running fractal thinking for agent ${this.ctx.agentId}`);
+
     // 分析最近事件，生成元规则
     const metaRules = await this.analyzePatterns();
-    
+
     // 持久化元规则
     await this.persistMetaRules(metaRules);
-    
-    console.log(`[EvolutionScheduler] Generated ${metaRules.length} meta rules`);
+
+    this.logger.info(`Generated ${metaRules.length} meta rules`);
   }
 
   /**
@@ -66,12 +68,12 @@ export class EvolutionScheduler {
    * - 清理空文件和损坏的 JSON
    */
   async organizeDomainKnowledge(): Promise<void> {
-    console.log(`[EvolutionScheduler] Organizing domain knowledge for agent ${this.ctx.agentId}`);
+    this.logger.info(`Organizing domain knowledge for agent ${this.ctx.agentId}`);
     
     const knowledgeDir = getKnowledgeStorageDir(this.ctx);
     
     if (!fs.existsSync(knowledgeDir)) {
-      console.log("[EvolutionScheduler] No knowledge directory found");
+      this.logger.info("No knowledge directory found");
       return;
     }
     
@@ -101,7 +103,7 @@ export class EvolutionScheduler {
             // 检测空文件
             if (stat.size === 0) {
               report.emptyFiles++;
-              console.log(`[EvolutionScheduler] Empty file: ${fullPath}`);
+              this.logger.info(`Empty file: ${fullPath}`);
               continue;
             }
 
@@ -112,7 +114,7 @@ export class EvolutionScheduler {
                 JSON.parse(content);
               } catch {
                 report.invalidJson++;
-                console.log(`[EvolutionScheduler] Invalid JSON: ${fullPath}`);
+                this.logger.info(`Invalid JSON: ${fullPath}`);
               }
             }
             
@@ -123,7 +125,7 @@ export class EvolutionScheduler {
             report.categories[category].count++;
             report.categories[category].size += stat.size;
           } catch (err) {
-            console.error(`[EvolutionScheduler] Error scanning ${fullPath}:`, err);
+            this.logger.error(`Error scanning ${fullPath}`, err);
           }
         }
       }
@@ -137,7 +139,7 @@ export class EvolutionScheduler {
       fs.writeFileSync(reportPath, JSON.stringify(report, null, 2), 'utf-8');
     } catch { /* ignore */ }
 
-    console.log(`[EvolutionScheduler] Organized: ${report.totalFiles} files, ${report.emptyFiles} empty, ${report.invalidJson} invalid JSON`);
+    this.logger.info(`Organized: ${report.totalFiles} files, ${report.emptyFiles} empty, ${report.invalidJson} invalid JSON`);
   }
 
   /**
@@ -147,12 +149,12 @@ export class EvolutionScheduler {
    * - 生成审查报告
    */
   async reviewDomainKnowledge(): Promise<void> {
-    console.log(`[EvolutionScheduler] Reviewing domain knowledge for agent ${this.ctx.agentId}`);
+    this.logger.info(`Reviewing domain knowledge for agent ${this.ctx.agentId}`);
     
     const knowledgeDir = getKnowledgeStorageDir(this.ctx);
     
     if (!fs.existsSync(knowledgeDir)) {
-      console.log("[EvolutionScheduler] No knowledge directory found");
+      this.logger.info("No knowledge directory found");
       return;
     }
     
@@ -227,7 +229,7 @@ export class EvolutionScheduler {
           }
         }
       } catch (err) {
-        console.error('[EvolutionScheduler] Error reviewing entities:', err);
+        this.logger.error('Error reviewing entities', err);
       }
     }
 
@@ -237,8 +239,8 @@ export class EvolutionScheduler {
       fs.writeFileSync(reportPath, JSON.stringify(review, null, 2), 'utf-8');
     } catch { /* ignore */ }
 
-    console.log(
-      `[EvolutionScheduler] Reviewed: ${review.totalEntities} entities, ` +
+    this.logger.info(
+      `Reviewed: ${review.totalEntities} entities, ` +
       `${review.totalRelations} relations, ${review.staleEntities} stale, ` +
       `${review.orphanRelations} orphan relations`
     );
@@ -248,13 +250,13 @@ export class EvolutionScheduler {
    * 主动学习检测
    */
   async runActiveLearning(): Promise<void> {
-    console.log(`[EvolutionScheduler] Running active learning for agent ${this.ctx.agentId}`);
+    this.logger.info(`Running active learning for agent ${this.ctx.agentId}`);
     
     // 检测学习机会
     const learningOpportunities = await this.detectLearningOpportunities();
     
     if (learningOpportunities.length > 0) {
-      console.log(`[EvolutionScheduler] Found ${learningOpportunities.length} learning opportunities`);
+      this.logger.info(`Found ${learningOpportunities.length} learning opportunities`);
     }
   }
 
@@ -349,9 +351,9 @@ export class EvolutionScheduler {
       const merged = [...existing, ...rules];
       fs.writeFileSync(filePath, JSON.stringify(merged, null, 2), "utf8");
       
-      console.log(`[EvolutionScheduler] Persisted ${rules.length} meta rules to: ${filePath}`);
+      this.logger.info(`Persisted ${rules.length} meta rules to: ${filePath}`);
     } catch (error) {
-      console.error("[EvolutionScheduler] Persist meta rules error:", error);
+      this.logger.error('Persist meta rules error', error);
     }
   }
 
@@ -361,7 +363,7 @@ export class EvolutionScheduler {
   private ensureDirectory(dirPath: string): void {
     if (!fs.existsSync(dirPath)) {
       fs.mkdirSync(dirPath, { recursive: true });
-      console.log(`[EvolutionScheduler] Created storage directory: ${dirPath}`);
+      this.logger.info(`Created storage directory: ${dirPath}`);
     }
   }
 }

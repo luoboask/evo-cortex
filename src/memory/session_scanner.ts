@@ -17,6 +17,7 @@ import { createRequire } from 'module';
 import { PluginContext, getDataDir } from '../utils/plugin-context';
 import { MemoryHub } from './memory_hub';
 import type { KnowledgeSystem } from '../knowledge/knowledge_system';
+import { getLogger } from '../utils/logger';
 
 export interface SessionInfo {
   id: string;
@@ -69,6 +70,7 @@ export class SessionScanner {
   private memoryHub: MemoryHub | null = null;
   private dbPath: string;
   private agentId: string;
+  private logger = getLogger({ component: 'SessionScanner' });
 
   constructor(ctx: PluginContext) {
     this.ctx = ctx;
@@ -141,8 +143,8 @@ export class SessionScanner {
 
     this.saveState();
 
-    console.log(
-      `[SessionScanner] ${this.agentId}: ` +
+    this.logger.info(
+      `${this.agentId}: ` +
       `${result.scanned} scanned, ${result.newSessions} new, ` +
       `${result.updatedSessions} updated, ${result.skipped} skipped, ` +
       `${result.memoriesSaved} memories, ` +
@@ -243,7 +245,7 @@ export class SessionScanner {
 
       return consolidated;
     } catch (err) {
-      console.error('[SessionScanner] WM consolidation error:', err);
+      this.logger.error('WM consolidation error', err);
       return 0;
     } finally {
       db.close();
@@ -594,7 +596,7 @@ export class SessionScanner {
          VALUES (?, ?, ?, ?, 'session_scan', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
         [prefId, pref.category, pref.value, pref.confidence],
         (err: Error | null) => {
-          if (err) console.error('[SessionScanner] Save pref error:', err);
+          if (err) this.logger.error('Save pref error', err);
         }
       );
     } finally {
@@ -610,7 +612,7 @@ export class SessionScanner {
   resetState(): void {
     this.state = {};
     this.saveState();
-    console.log(`[SessionScanner] Reset scan state`);
+    this.logger.info('Reset scan state');
   }
 
   // ========== 私有方法 ==========
@@ -665,7 +667,7 @@ export class SessionScanner {
         hash: contentHash
       };
     } catch (error) {
-      console.error(`[SessionScanner] Error parsing ${filePath}:`, error);
+      this.logger.error(`Error parsing ${filePath}`, error);
       return null;
     }
   }
@@ -750,7 +752,7 @@ export class SessionScanner {
 
       return result;
     } catch (error) {
-      console.error(`[SessionScanner] Error processing ${session.id}:`, error);
+      this.logger.error(`Error processing ${session.id}`, error);
       return result;
     }
   }
@@ -846,7 +848,7 @@ export class SessionScanner {
     try {
       fs.writeFileSync(this.stateFile, JSON.stringify(this.state, null, 2), 'utf8');
     } catch (error) {
-      console.error('[SessionScanner] Save state error:', error);
+      this.logger.error('Save state error', error);
     }
   }
 

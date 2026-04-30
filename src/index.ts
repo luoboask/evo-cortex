@@ -42,11 +42,6 @@ const plugin = {
     type: "object" as const,
     additionalProperties: true,
     properties: {
-      agent_name: {
-        type: "string",
-        description: "⚠️ 已废弃：插件现在会自动从上下文获取 agent ID",
-        deprecated: true
-      },
       memory: {
         type: "object",
         description: "记忆系统配置",
@@ -87,17 +82,17 @@ const plugin = {
         description: "语义搜索配置 - 控制记忆和知识搜索的搜索模式",
         properties: {
           enabled: { type: "boolean", description: "是否启用语义搜索", default: true },
-          mode: { 
-            type: "string", 
+          mode: {
+            type: "string",
             description: "搜索模式: auto=自动降级 | semantic=仅语义 | keyword=仅关键词",
             default: "auto",
             enum: ["auto", "semantic", "keyword"]
           },
-          fallback: { 
-            type: "string", 
-            description: "API 不可用时的降级策略: tfidf=本地TF-IDF | keyword=关键词匹配",
-            default: "tfidf",
-            enum: ["tfidf", "keyword"]
+          fallback: {
+            type: "string",
+            description: "API 不可用时的降级策略: fts=全文搜索 | keyword=关键词匹配",
+            default: "fts",
+            enum: ["fts", "keyword"]
           }
         }
       },
@@ -145,6 +140,13 @@ const plugin = {
       markAsConfigured(api.workspaceDir);
     }
 
+    // Helper: resolve workspace directory for a given agent
+    function resolveWorkspace(agentId: string, hookCtx?: any): string {
+      if (hookCtx?.workspaceDir && hookCtx.workspaceDir !== '/') return hookCtx.workspaceDir;
+      if (api.workspaceDir) return path.join(api.workspaceDir, '..', `workspace-${agentId}`);
+      return path.join(process.env.HOME || '', '.openclaw', `workspace-${agentId}`);
+    }
+
     // 初始化全局缓存
     const searchCache = getCache('search_results', { maxEntries: 500, defaultTTL: 10 * 60 * 1000 });
 
@@ -183,11 +185,12 @@ const plugin = {
         component: 'search_memory',
         verbose: config.verbose
       });
-      const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
-      // 附加 IndexBuilder（如果可用，延迟初始化）
-      const indexBuilder = initIndexBuilder(pluginCtx);
-      if (indexBuilder) {
-        memoryHub.setIndexBuilder(indexBuilder);
+      const memoryHub = getOrCreateHub(pluginCtx.agentId, pluginCtx.workspaceDir);
+      if (memoryHub) {
+        const indexBuilder = initIndexBuilder(pluginCtx);
+        if (indexBuilder) {
+          try { memoryHub.setIndexBuilder(indexBuilder); } catch {}
+        }
       }
 
       return {
@@ -199,6 +202,9 @@ const plugin = {
         }),
         async execute(_id: string, params: any) {
           try {
+            if (!memoryHub) {
+              return { content: [{ type: "text" as const, text: "MemoryHub not available" }] };
+            }
             toolLogger.debug(`Searching for: "${params.query}" (top_k: ${params.top_k || 5})`);
             const results = await memoryHub.search(params.query, params.top_k || 5);
             toolLogger.info(`Found ${results.length} results`);
@@ -450,7 +456,7 @@ const plugin = {
     api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({ agentId: pluginCtx.agentId, component: 'memory_compress', verbose: config.verbose });
-      const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
+      const memoryHub = getOrCreateHub(pluginCtx.agentId, pluginCtx.workspaceDir);
 
       return {
         name: "memory_compress",
@@ -460,6 +466,9 @@ const plugin = {
         }),
         async execute(_id: string, params: any) {
           try {
+            if (!memoryHub) {
+              return { content: [{ type: "text" as const, text: "MemoryHub not available" }] };
+            }
             toolLogger.debug(`Compressing: ${params.granularity}`);
             let report;
             if (params.granularity === 'daily') report = await memoryHub.compressDaily();
@@ -478,7 +487,7 @@ const plugin = {
     api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({ agentId: pluginCtx.agentId, component: 'memory_cleanup', verbose: config.verbose });
-      const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
+      const memoryHub = getOrCreateHub(pluginCtx.agentId, pluginCtx.workspaceDir);
 
       return {
         name: "memory_cleanup",
@@ -486,6 +495,9 @@ const plugin = {
         parameters: Type.Object({}),
         async execute(_id: string) {
           try {
+            if (!memoryHub) {
+              return { content: [{ type: "text" as const, text: "MemoryHub not available" }] };
+            }
             const report = memoryHub.cleanup();
             toolLogger.info(`Cleanup: ${report.dailyRemoved}d ${report.weeklyRemoved}w ${report.monthlyRemoved}m removed`);
             return { content: [{ type: "text" as const, text: JSON.stringify(report, null, 2) }] };
@@ -871,6 +883,18 @@ const plugin = {
     const msCache = new Map<string, MemorySystem>();
     const ksCache = new Map<string, KnowledgeSystem>();
     const hubFallbackCache = new Map<string, MemoryHub>(); // 仅用于 markdown 回退
+    const hubCache = new Map<string, MemoryHub>();
+
+    function getOrCreateHub(agentId: string, workspaceDir: string): MemoryHub | null {
+      if (!hubCache.has(agentId)) {
+        try {
+          const pluginCtx = { agentId, workspaceDir, storageBaseDir: process.env.HOME || '/tmp' } as any;
+          const hub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
+          hubCache.set(agentId, hub);
+        } catch { return null; }
+      }
+      return hubCache.get(agentId) || null;
+    }
 
     function getOrCreateMemory(agentId: string, workspaceDir: string): { ms: MemorySystem | null; ks: KnowledgeSystem | null } {
       // MemorySystem
@@ -878,7 +902,7 @@ const plugin = {
         try {
           const dataDir = path.join(workspaceDir, 'data');
           const ms = new MemorySystem(agentId, dataDir, workspaceDir);
-          ms.init().catch(e => console.warn(`[evo-cortex] MemorySystem init failed for ${agentId}: ${e.message}`));
+          ms.init().catch(e => getLogger({ agentId, component: 'memory_system' }).warn(`MemorySystem init failed: ${e.message}`));
           try {
             const indexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
             const builder = indexer.getIndexBuilder();
@@ -893,7 +917,7 @@ const plugin = {
         try {
           const dataDir = path.join(workspaceDir, 'data');
           const ks = new KnowledgeSystem(agentId, dataDir);
-          ks.init().catch(e => console.warn(`[evo-cortex] KnowledgeSystem init failed for ${agentId}: ${e.message}`));
+          ks.init().catch(e => getLogger({ agentId, component: 'knowledge_system' }).warn(`KnowledgeSystem init failed: ${e.message}`));
           ksCache.set(agentId, ks);
         } catch { /* ignore */ }
       }
@@ -913,7 +937,7 @@ const plugin = {
 
     // ========== Hooks ==========
 
-    // 1. message:received — 极简版：注入用户偏好 + 最近记忆标题摘要（<5ms，不搜索不写入）
+    // 1. message:received — 极简版：注入用户偏好 + 最近记忆标题摘要（可执行语义搜索，超时保护2s）
     const prefCache = new Map<string, { content: string; ts: number }>();
     const PREF_TTL = 5 * 60 * 1000;       // 有偏好时缓存 5 分钟
     const EMPTY_PREF_TTL = 2 * 60 * 1000; // 空结果缓存 2 分钟
@@ -994,7 +1018,7 @@ const plugin = {
           const sessionKey = message?.sessionKey || hookCtx?.sessionKey || '';
           const parts = sessionKey.split(':');
           const agentId = parts.length >= 2 ? parts[1] : 'main';
-          const workspaceDir = path.join(process.env.HOME || '', '.openclaw', `workspace-${agentId}`);
+          const workspaceDir = resolveWorkspace(agentId, hookCtx);
           const injectionParts: string[] = [];
 
           // --- 1. 用户偏好注入（缓存读取，独立降级）---
@@ -1158,7 +1182,7 @@ const plugin = {
           // 允许所有 agent（包括 main）使用此插件
           if (!agentId) return;
 
-          const workspaceDir = path.join(process.env.HOME || '', '.openclaw', `workspace-${agentId}`);
+          const workspaceDir = resolveWorkspace(agentId, ctx);
           const logger = getLogger({ component: 'agent_end', agentId });
 
           // 从 event.messages 中提取最后一条用户消息和 AI 回复

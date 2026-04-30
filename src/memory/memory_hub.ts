@@ -16,6 +16,7 @@ import { EmbeddingCache, cosineSimilarity } from "./embedding_cache";
 import { RagEvaluator } from "../knowledge/rag_evaluator";
 import { IndexBuilder } from "./index_builder";
 import type { EmbeddingConfig, RetentionPolicy } from "../utils/config-validator";
+import { getLogger } from "../utils/logger";
 
 // ========== 配置 ==========
 
@@ -74,6 +75,7 @@ export class MemoryHub {
   private lastEmbeddingAttempt: number = 0;
   private embeddingRetryInterval: number = 5 * 60 * 1000;
   private indexBuilder?: IndexBuilder; // 可选的 FTS+向量索引
+  private logger = getLogger({ component: 'MemoryHub' });
 
   constructor(ctx: PluginContext, config?: Partial<MemoryConfig>, embeddingConfig?: Partial<EmbeddingConfig>, retention?: Partial<RetentionPolicy>) {
     this.ctx = ctx;
@@ -113,7 +115,7 @@ export class MemoryHub {
     this.semanticSearch = new SemanticSearch(embeddingFunc, 5000);
     this.ragEval = new RagEvaluator(ctx);
     // 异步加载，不阻塞构造函数
-    this.load().catch(err => console.error('[MemoryHub] Load error:', err));
+    this.load().catch(err => this.logger.error('Load error', err));
   }
 
   // ========== 写入 ==========
@@ -121,7 +123,7 @@ export class MemoryHub {
   /** 设置索引构建器（可选，用于启用 FTS+向量搜索） */
   setIndexBuilder(indexBuilder: IndexBuilder): void {
     this.indexBuilder = indexBuilder;
-    console.log('[MemoryHub] IndexBuilder attached, unified search enabled');
+    this.logger.info('IndexBuilder attached, unified search enabled');
   }
 
   async add(entry: Omit<MemoryEntry, "id">): Promise<MemoryEntry> {
@@ -180,10 +182,10 @@ export class MemoryHub {
               layer: 'session'
             });
           }
-          console.log(`[MemoryHub] Unified search returned ${unifiedResults.length} results`);
+          this.logger.info(`Unified search returned ${unifiedResults.length} results`);
         }
       } catch (err: any) {
-        console.warn(`[MemoryHub] Unified search failed, falling back to layered search: ${err.message}`);
+        this.logger.warn(`Unified search failed, falling back to layered search: ${err.message}`);
       }
     }
 
@@ -557,7 +559,7 @@ export class MemoryHub {
       this.ensureDirectory(dir);
       const filePath = path.join(dir, `${dateStrValue}.md`);
       fs.appendFileSync(filePath, this.formatMemoryAsMarkdown(entry) + '\n', 'utf8');
-    } catch (err) { console.error('[MemoryHub] Persist error:', err); }
+    } catch (err) { this.logger.error('Persist error', err); }
   }
 
   private async persist(entry: MemoryEntry): Promise<void> {
@@ -590,7 +592,7 @@ export class MemoryHub {
       this.memories = rawEntries;
       // TF-IDF 已移除，embedding 不可用时由 FTS 降级
       for (const entry of this.memories) this.addToSemanticSearch(entry).catch(() => {});
-    } catch (err) { console.error('[MemoryHub] Load error:', err); }
+    } catch (err) { this.logger.error('Load error', err); }
   }
 
   private formatMemoryAsMarkdown(entry: MemoryEntry): string {

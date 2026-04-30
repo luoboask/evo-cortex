@@ -13,6 +13,7 @@ import { PluginContext, getDataDir } from '../utils/plugin-context';
 import { FtsIndex, FtsDocument } from './fts_index';
 import { VectorIndexStore, VectorDocument } from './vector_index';
 import { getEmbedding, getEmbeddingsBatch, getEmbeddingLevel } from './embedding_provider';
+import { getLogger } from '../utils/logger';
 
 // ========== 类型 ==========
 
@@ -56,6 +57,7 @@ export class IndexBuilder {
   private vectorStore: VectorIndexStore;
   private statePath: string;
   private dbIndexState: Record<string, { indexedAt: string; table: string }> = {}; // wm_xxx / ltm_xxx → 索引状态
+  private logger = getLogger({ component: 'IndexBuilder' });
 
   constructor(ctx: PluginContext) {
     this.ctx = ctx;
@@ -102,7 +104,7 @@ export class IndexBuilder {
           }
         }
       } catch (err: any) {
-        console.warn(`[IndexBuilder] Vector search failed, falling back to FTS: ${err.message}`);
+        this.logger.warn(`Vector search failed, falling back to FTS: ${err.message}`);
       }
     }
 
@@ -129,7 +131,7 @@ export class IndexBuilder {
 
     // 排序并返回 topK
     const sorted = Array.from(results.values()).sort((a, b) => b.score - a.score);
-    console.log(`[IndexBuilder] Search "${query}": mode=${searchMode}, results=${sorted.length}`);
+    this.logger.info(`Search "${query}": mode=${searchMode}, results=${sorted.length}`);
     return sorted.slice(0, topK);
   }
 
@@ -172,7 +174,7 @@ export class IndexBuilder {
       const dataDir = getDataDir(this.ctx);
       const dbPath = path.join(dataDir, 'memory.db');
       if (!fs.existsSync(dbPath)) {
-        console.log('[IndexBuilder] buildFromDb skipped: memory.db not found');
+        this.logger.info('buildFromDb skipped: memory.db not found');
         return result;
       }
 
@@ -196,7 +198,7 @@ export class IndexBuilder {
 
         result.dbRowsScanned = wmRows.length + ltmRows.length;
         if (result.dbRowsScanned === 0) {
-          console.log(`[IndexBuilder] buildFromDb: no new rows to index`);
+          this.logger.info('buildFromDb: no new rows to index');
           return result;
         }
 
@@ -275,7 +277,7 @@ export class IndexBuilder {
           cleanedFiles++;
         }
         if (cleanedFiles > 0) {
-          console.log(`[IndexBuilder] migrated ${cleanedFiles} legacy file-scan entries from FTS index`);
+          this.logger.info(`migrated ${cleanedFiles} legacy file-scan entries from FTS index`);
         }
 
         // 清理 dbIndexState 中已不存在的条目（TTL 删除、手动删除等）
@@ -304,19 +306,19 @@ export class IndexBuilder {
           }
         }
         if (staleCleaned > 0) {
-          console.log(`[IndexBuilder] cleaned ${staleCleaned} stale index entries (deleted from DB)`);
+          this.logger.info(`cleaned ${staleCleaned} stale index entries (deleted from DB)`);
         }
       } finally {
         db.close();
       }
 
       result.durationMs = Date.now() - startTime;
-      console.log(`[IndexBuilder] buildFromDb: scanned=${result.dbRowsScanned}, indexed=${result.dbRowsIndexed}, fts=${result.ftsCount}, vec=${result.vectorCount} in ${result.durationMs}ms`);
+      this.logger.info(`buildFromDb: scanned=${result.dbRowsScanned}, indexed=${result.dbRowsIndexed}, fts=${result.ftsCount}, vec=${result.vectorCount} in ${result.durationMs}ms`);
     } catch (err: any) {
       errors.push(`buildFromDb failed: ${err.message}`);
       result.success = false;
       result.durationMs = Date.now() - startTime;
-      console.error('[IndexBuilder] buildFromDb error:', err);
+      this.logger.error('buildFromDb error', err);
     }
 
     this.saveState();
@@ -380,7 +382,7 @@ export class IndexBuilder {
         dbIndexState: this.dbIndexState
       }, null, 2), 'utf-8');
     } catch (err) {
-      console.error('[IndexBuilder] Save state error:', err);
+      this.logger.error('Save state error', err);
     }
   }
 }
