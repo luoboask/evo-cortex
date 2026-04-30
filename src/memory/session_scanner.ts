@@ -68,13 +68,11 @@ export class SessionScanner {
   private state: ScanState;
   private memoryHub: MemoryHub | null = null;
   private dbPath: string;
-  private workspaceDir: string;
   private agentId: string;
 
   constructor(ctx: PluginContext) {
     this.ctx = ctx;
     this.agentId = ctx.agentId;
-    this.workspaceDir = ctx.workspaceDir;
 
     const homeDir = process.env.HOME || '/tmp';
     this.sessionsDir = path.join(homeDir, '.openclaw', 'agents', ctx.agentId, 'sessions');
@@ -91,7 +89,7 @@ export class SessionScanner {
   /**
    * 扫描所有会话 + 整合工作记忆
    */
-  async scan(knowledgeGraph?: KnowledgeSystem): Promise<ScanResult> {
+  async scan(_knowledgeGraph?: KnowledgeSystem): Promise<ScanResult> {
     const result: ScanResult = {
       scanned: 0,
       newSessions: 0,
@@ -166,7 +164,7 @@ export class SessionScanner {
    * 5. 提取偏好（喜欢/不喜欢/格式要求）
    * 6. 标记已整合的工作记忆（延长 TTL 或标记）
    */
-  async consolidateWorkingMemory(knowledgeGraph?: KnowledgeSystem): Promise<number> {
+  async consolidateWorkingMemory(_knowledgeGraph?: KnowledgeSystem): Promise<number> {
     if (!fs.existsSync(this.dbPath)) return 0;
 
     const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
@@ -753,7 +751,7 @@ export class SessionScanner {
   private buildSessionSummary(
     userMsgs: Array<{ content: string; timestamp?: string }>,
     assistantMsgs: Array<{ content: string; timestamp?: string }>,
-    session: SessionInfo
+    _session: SessionInfo
   ): string {
     const MAX_PREVIEW = 500;
     const parts: string[] = [];
@@ -783,7 +781,7 @@ export class SessionScanner {
    */
   private shouldPromote(
     messages: Array<{ type: string; content: string; timestamp?: string }>,
-    session: SessionInfo
+    _session: SessionInfo
   ): boolean {
     const userMsgs = messages.filter(m => m.type === 'user');
     const assistantMsgs = messages.filter(m => m.type === 'assistant');

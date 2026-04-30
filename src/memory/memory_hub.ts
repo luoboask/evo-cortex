@@ -10,11 +10,11 @@ import * as fs from "fs";
 import * as path from "path";
 import { createRequire } from "module";
 import { PluginContext, getMemoryStorageDir, getDataDir } from "../utils/plugin-context";
-import { SemanticSearch, SearchableDocument } from "./semantic_search";
+import { SemanticSearch } from "./semantic_search";
 import { getEmbedding, getEmbeddingLevel, simpleKeywordMatch } from "./embedding_provider";
 import { EmbeddingCache, cosineSimilarity } from "./embedding_cache";
-import { RagEvaluator, RetrievalResult } from "../knowledge/rag_evaluator";
-import { IndexBuilder, UnifiedSearchResult } from "./index_builder";
+import { RagEvaluator } from "../knowledge/rag_evaluator";
+import { IndexBuilder } from "./index_builder";
 import type { EmbeddingConfig, RetentionPolicy } from "../utils/config-validator";
 
 // ========== 配置 ==========

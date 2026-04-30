@@ -1,27 +1,34 @@
 /**
  * Memory Hub Unit Tests
  */
-import { MemoryHub, MemoryEntry } from "../src/memory/memory_hub";
+import { MemoryHub, MemoryEntry, MemoryConfig } from "../src/memory/memory_hub";
+import { PluginContext } from "../src/utils/plugin-context";
 import * as fs from "fs";
 import * as path from "path";
 
 // 测试目录
 const TEST_DIR = "memory/test-agent";
-const TEST_STORAGE = TEST_DIR;
+const TEST_WORKSPACE = TEST_DIR;
+
+function makeCtx(): PluginContext {
+  return {
+    agentId: "test-agent",
+    workspaceDir: TEST_WORKSPACE,
+    storageBaseDir: TEST_DIR,
+  };
+}
 
 describe("MemoryHub", () => {
   let memoryHub: MemoryHub;
 
   beforeEach(() => {
-    // 清理测试目录
     if (fs.existsSync(TEST_DIR)) {
       fs.rmSync(TEST_DIR, { recursive: true });
     }
-    memoryHub = new MemoryHub("test-agent");
+    memoryHub = new MemoryHub(makeCtx());
   });
 
   afterEach(() => {
-    // 清理测试目录
     if (fs.existsSync(TEST_DIR)) {
       fs.rmSync(TEST_DIR, { recursive: true });
     }
@@ -48,7 +55,7 @@ describe("MemoryHub", () => {
       });
 
       const today = new Date().toISOString().split("T")[0];
-      const filePath = path.join(TEST_STORAGE, `${today}.md`);
+      const filePath = path.join(TEST_WORKSPACE, "memory", "test-agent", `${today}.md`);
 
       expect(fs.existsSync(filePath)).toBe(true);
     });

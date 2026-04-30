@@ -31,18 +31,11 @@ interface MetaRule {
 
 export class EvolutionScheduler {
   private ctx: PluginContext;
-  private config: EvolutionConfig;
   private storageDir: string;
   private recentEvents: Array<{ timestamp: string; content: string }> = [];
 
-  constructor(ctx: PluginContext, config?: Partial<EvolutionConfig>) {
+  constructor(ctx: PluginContext, _config?: Partial<EvolutionConfig>) {
     this.ctx = ctx;
-    this.config = {
-      enabled: true,
-      fractal_thinking: true,
-      active_learning: true,
-      ...config
-    };
 
     // 使用绝对路径初始化存储目录
     this.storageDir = getEvolutionStorageDir(ctx);
@@ -179,8 +172,7 @@ export class EvolutionScheduler {
       try {
         const entities = JSON.parse(fs.readFileSync(entitiesPath, 'utf-8'));
         const entityIds = new Set<string>();
-        const relationIds = new Set<string>();
-        
+
         // 统计实体
         if (Array.isArray(entities)) {
           for (const entity of entities) {

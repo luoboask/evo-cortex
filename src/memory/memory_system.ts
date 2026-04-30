@@ -269,8 +269,6 @@ export class MemorySystem {
   }): Promise<{ promoted: number; promotedIds: string[] }> {
     await this.ensureInit();
 
-    const now = new Date().toISOString();
-
     return new Promise<{ promoted: number; promotedIds: string[] }>((resolve, reject) => {
       // 1. 最新 100 条之后的记录，importance >= 7 即晋升
       this.db.all(
@@ -419,16 +417,16 @@ export class MemorySystem {
 
     try {
       const ibResults = await this.indexBuilder.unifiedSearch(query.text, limit);
-      return ibResults.map(r => ({
-        id: `idx_${r.id}`,
+      return ibResults.map((_r: any) => ({
+        id: `idx_${_r.id}`,
         type: 'indexed_file',
         targetType: 'event' as const,
-        title: r.metadata?.filename || r.id,
-        content: r.content,
-        importance: Math.min(r.score * 10, 10),  // 归一化到 0-10 范围，与 importance 对齐
+        title: _r.metadata?.filename || _r.id,
+        content: _r.content,
+        importance: Math.min(_r.score * 10, 10),  // 归一化到 0-10 范围，与 importance 对齐
         recall_count: 0,
-        created_at: r.metadata?.modifiedAt || new Date().toISOString(),
-        dynamicScore: r.score,
+        created_at: _r.metadata?.modifiedAt || new Date().toISOString(),
+        dynamicScore: _r.score,
       }));
     } catch (err: any) {
       this.indexLogger?.debug?.(`IndexBuilder search failed: ${err.message}`);
@@ -450,14 +448,14 @@ export class MemorySystem {
     if (terms.length === 0) return [];
 
     // (content LIKE '%a%' OR content LIKE '%b%' OR title LIKE '%a%' OR title LIKE '%b%')
-    const contentLikes = terms.map(t => `content LIKE ?`).join(' OR ');
-    const titleLikes = terms.map(t => `title LIKE ?`).join(' OR ');
+    const contentLikes = terms.map((_t) => `content LIKE ?`).join(' OR ');
+    const titleLikes = terms.map((_t) => `title LIKE ?`).join(' OR ');
     const likeClause = `(${contentLikes} OR ${titleLikes})`;
 
     const likeParams = [...terms.map(t => `%${t}%`), ...terms.map(t => `%${t}%`)]; // content terms + title terms
     const params = [...typeParams, ...likeParams, limit * 2];
 
-    return new Promise<SearchResult[]>((resolve, reject) => {
+    return new Promise<SearchResult[]>((resolve, _reject) => {
       this.db.all(
         `SELECT id, type, title, content, importance, recall_count, created_at
          FROM long_term_memory
@@ -493,13 +491,13 @@ export class MemorySystem {
     const terms = query.text.trim().split(/\s+/).filter(Boolean);
     if (terms.length === 0) return [];
 
-    const contentLikes = terms.map(t => `content LIKE ?`).join(' OR ');
-    const titleLikes = terms.map(t => `title LIKE ?`).join(' OR ');
+    const contentLikes = terms.map((_t) => `content LIKE ?`).join(' OR ');
+    const titleLikes = terms.map((_t) => `title LIKE ?`).join(' OR ');
     const likeClause = `(${contentLikes} OR ${titleLikes})`;
 
     const params = [...terms.map(t => `%${t}%`), ...terms.map(t => `%${t}%`), limit]; // content terms + title terms + limit
 
-    return new Promise<SearchResult[]>((resolve, reject) => {
+    return new Promise<SearchResult[]>((resolve, _reject) => {
       this.db.all(
         `SELECT id, type, title, content, importance, created_at
          FROM working_memory

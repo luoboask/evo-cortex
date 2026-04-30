@@ -9,11 +9,10 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createRequire } from 'module';
 const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
-import { PluginContext, getDataDir, getMemoryStorageDir } from '../utils/plugin-context';
+import { PluginContext, getDataDir } from '../utils/plugin-context';
 import { FtsIndex, FtsDocument } from './fts_index';
 import { VectorIndexStore, VectorDocument } from './vector_index';
 import { getEmbedding, getEmbeddingsBatch, getEmbeddingLevel } from './embedding_provider';
-import { SearchableDocument } from './semantic_search';
 
 // ========== 类型 ==========
 

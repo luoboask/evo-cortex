@@ -271,6 +271,6 @@ export function getConfigSummary(config: ValidatedConfig): string {
 /**
  * 检查配置是否有效（无严重错误）
  */
-export function isConfigValid(config: ValidatedConfig): boolean {
+export function isConfigValid(_config: ValidatedConfig): boolean {
   return true;
 }

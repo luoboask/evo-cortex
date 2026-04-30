@@ -8,7 +8,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const CRON_SETUP_MARKER = '.evo-cortex-crons-configured';
-const SETUP_SCRIPT_PATH = path.join(__dirname, '../scripts/setup-crons.sh');
 
 export interface CronDefinition {
   id: string;

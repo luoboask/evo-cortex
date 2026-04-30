@@ -269,7 +269,6 @@ export async function getApiEmbeddingBatch(texts: string[]): Promise<(number[] |
 
   // 请求去重：相同文本共享 Promise
   const uniqueTexts = [...new Set(texts)];
-  const uniquePromises: PendingRequest[] = [];
   const textToPromise = new Map<string, PendingRequest>();
 
   for (const text of uniqueTexts) {

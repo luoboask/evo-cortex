@@ -143,14 +143,11 @@ const STOP_WORDS = new Set([
 
 export class KnowledgeSystem {
   private db: any;
-  private memoryDb: any;
   private dbPath: string;
-  private memoryDbPath: string;
   private initialized: boolean = false;
 
   constructor(agentId: string, dataDir: string) {
     this.dbPath = path.join(dataDir, agentId, 'knowledge.db');
-    this.memoryDbPath = path.join(dataDir, agentId, 'memory.db');
   }
 
   /** 初始化数据库 */
@@ -522,7 +519,7 @@ export class KnowledgeSystem {
       memoryDb.all(
         `SELECT type, COUNT(*) as cnt FROM long_term_memory GROUP BY type HAVING cnt >= 3`,
         [],
-        (err: Error | null, rows: any[]) => {
+        (_err: Error | null, rows: any[]) => {
           resolve(rows || []);
         }
       );
@@ -534,7 +531,7 @@ export class KnowledgeSystem {
         this.db.get(
           `SELECT * FROM rules WHERE type = ? AND title LIKE ?`,
           [type, `%${type}%`],
-          (err: Error | null, row: any) => {
+          (_err: Error | null, row: any) => {
             resolve(row || null);
           }
         );
@@ -567,7 +564,7 @@ export class KnowledgeSystem {
         this.db.get(
           `SELECT * FROM rules WHERE title LIKE ? AND type = 'pattern_candidate'`,
           [ruleSearchTerm],
-          (err: Error | null, row: any) => {
+          (_err: Error | null, row: any) => {
             resolve(row || null);
           }
         );
@@ -598,7 +595,7 @@ export class KnowledgeSystem {
 
     const searchTerm = `%${query}%`;
 
-    return new Promise<KnowledgeEntity[]>((resolve, reject) => {
+    return new Promise<KnowledgeEntity[]>((resolve, _reject) => {
       this.db.all(
         `SELECT * FROM entities WHERE name LIKE ? OR description LIKE ? OR type LIKE ?
          ORDER BY importance DESC, mention_count DESC
@@ -624,7 +621,7 @@ export class KnowledgeSystem {
     const searchTerm = `%${query.text}%`;
     const limit = query.limit || 20;
 
-    return new Promise<any[]>((resolve, reject) => {
+    return new Promise<any[]>((resolve, _reject) => {
       this.db.all(
         `SELECT r.*,
           s.name as source_name, s.type as source_type,
@@ -655,7 +652,7 @@ export class KnowledgeSystem {
 
     const searchTerm = `%${query}%`;
 
-    return new Promise<KnowledgeRule[]>((resolve, reject) => {
+    return new Promise<KnowledgeRule[]>((resolve, _reject) => {
       this.db.all(
         `SELECT * FROM rules WHERE title LIKE ? OR type LIKE ? OR action LIKE ?
          ORDER BY confidence DESC
@@ -738,7 +735,7 @@ export class KnowledgeSystem {
     await this.ensureInit();
 
     const byTypeRow = await new Promise<Record<string, number>>((resolve) => {
-      this.db.all(`SELECT type, COUNT(*) as cnt FROM entities GROUP BY type`, [], (err: Error | null, rows: any[]) => {
+      this.db.all(`SELECT type, COUNT(*) as cnt FROM entities GROUP BY type`, [], (_err: Error | null, rows: any[]) => {
         const result: Record<string, number> = {};
         if (rows) {
           for (const row of rows) {
@@ -757,7 +754,7 @@ export class KnowledgeSystem {
           (SELECT COUNT(*) FROM rules) as rules,
           (SELECT COUNT(*) FROM entity_ltm_links) as entityLinks`,
         [],
-        (err: Error | null, row: any) => {
+        (_err: Error | null, row: any) => {
           resolve(row || { entities: 0, relations: 0, rules: 0, entityLinks: 0 });
         }
       );
@@ -783,7 +780,6 @@ export class KnowledgeSystem {
 
   private runAsyncResult(sql: string, params: any[]): Promise<any> {
     return new Promise<any>((resolve, reject) => {
-      const self = this;
       this.db.run(sql, params, function (this: any, err: Error | null) {
         if (err) reject(err);
         else resolve({ changes: this?.changes || 0 });

@@ -92,7 +92,7 @@ export class SemanticSearch {
     // 计算所有文档的余弦相似度
     const results: SemanticSearchResult[] = [];
 
-    for (const [id, doc] of this.documents) {
+    for (const [_id, doc] of this.documents) {
       if (doc.embedding && doc.embedding.length === queryEmbedding.length) {
         const similarity = cosineSimilarity(queryEmbedding, doc.embedding);
         results.push({
@@ -122,7 +122,7 @@ export class SemanticSearch {
 
     const results: SemanticSearchResult[] = [];
 
-    for (const [id, doc] of this.documents) {
+    for (const [_id, doc] of this.documents) {
       const contentLower = doc.content.toLowerCase();
       let score = 0;
       let matched = 0;

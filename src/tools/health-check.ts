@@ -134,7 +134,6 @@ export async function runHealthCheck(
   // ========== 性能指标 ==========
   try {
     // 缓存命中率
-    const cacheStats = searchCache.getStats();
     report.components.performance.cacheHitRate = calculateCacheHitRate(searchCache);
     
     // 简单性能测试

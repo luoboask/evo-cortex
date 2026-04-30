@@ -6,16 +6,14 @@ import { createRequire } from 'module';
 import { MemoryHub } from "./memory/memory_hub";
 import { MemorySystem } from "./memory/memory_system";
 import { KnowledgeSystem } from "./knowledge/knowledge_system";
-import { EvolutionScheduler } from "./evolution/scheduler";
 import { beforeToolCallHook } from "./hooks";
 import { MemoryIndexer } from "./memory/memory_indexer";
 import { IndexBuilder } from "./memory/index_builder";
 import { SessionScanner } from "./memory/session_scanner";
 import { WebCrawler } from "./knowledge/web_crawler";
-import { buildPluginContext, getMemoryStorageDir, getKnowledgeStorageDir, getDataDir, PluginContext } from "./utils/plugin-context";
+import { buildPluginContext, getDataDir, PluginContext } from "./utils/plugin-context";
 import { getLogger } from "./utils/logger";
-import { validateConfig, getConfigSummary } from "./utils/config-validator";
-import type { RetentionPolicy } from "./utils/config-validator";
+import { validateConfig } from "./utils/config-validator";
 import { getCache } from "./utils/cache";
 import { runHealthCheck, formatHealthReport } from "./tools/health-check";
 import { checkAndPrompt, markAsConfigured, isCronConfigured } from "./utils/cron-auto-setup";
@@ -159,15 +157,13 @@ const plugin = {
       try {
         const builder = new IndexBuilder(pluginCtx);
         sharedIndexBuilders.set(agentId, builder);
-        console.log(`[evo-cortex] Shared IndexBuilder initialized for agent: ${agentId}`);
         return builder;
-      } catch (err: any) {
-        console.warn(`[evo-cortex] IndexBuilder init failed for ${agentId} (will use layered search): ${err.message}`);
+      } catch {
         return null;
       }
     };
 
-    // ========== 注册工具（使用工厂函数模式）==========
+    // ========== 注册工具 ==========
 
     // 1. 记忆搜索工具
     api.registerTool((ctx: OpenClawPluginToolContext) => {
@@ -441,7 +437,7 @@ const plugin = {
     });
 
     // 7. 记忆压缩工具
-    api.registerTool((ctx) => {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({ agentId: pluginCtx.agentId, component: 'memory_compress', verbose: config.verbose });
       const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
@@ -469,7 +465,7 @@ const plugin = {
     });
 
     // 8. 记忆清理工具
-    api.registerTool((ctx) => {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({ agentId: pluginCtx.agentId, component: 'memory_cleanup', verbose: config.verbose });
       const memoryHub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
@@ -492,7 +488,7 @@ const plugin = {
     });
 
     // 9. 网络爬取工具（不需要 agent 上下文）
-    api.registerTool(() => {
+    api.registerTool((_ctx: OpenClawPluginToolContext) => {
       const toolLogger = getLogger({
         component: 'crawl_web',
         verbose: config.verbose
@@ -531,7 +527,7 @@ const plugin = {
     });
 
     // 11. 健康检查工具
-    api.registerTool((ctx) => {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
@@ -587,7 +583,7 @@ const plugin = {
     });
 
     // 12. 长期记忆搜索工具（基于 memory.db）
-    api.registerTool((ctx) => {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
@@ -628,7 +624,7 @@ const plugin = {
     });
 
     // 13. 实体列表工具（基于 knowledge.db）
-    api.registerTool((ctx) => {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
@@ -670,7 +666,7 @@ const plugin = {
     });
 
     // 14. 规则列表工具（基于 knowledge.db）
-    api.registerTool((ctx) => {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
@@ -704,7 +700,7 @@ const plugin = {
     });
 
     // 15. 记忆晋升工具 — 将工作记忆晋升到长期记忆，并触发知识提取
-    api.registerTool((ctx) => {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
@@ -730,7 +726,7 @@ const plugin = {
             let kgUpdated = 0;
 
             const result = await ms.consolidate({
-              onPromoted: async (ltmId: string, row: any) => {
+              onPromoted: async (ltmId: string, _row: any) => {
                 if (!runKg || !ks) return;
                 const memoryDb = (ms as any).db;
                 if (memoryDb) {
@@ -756,7 +752,7 @@ const plugin = {
     });
 
     // 16. 记忆统计工具
-    api.registerTool((ctx) => {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
@@ -792,7 +788,7 @@ const plugin = {
     });
 
     // 17. 知识衰减工具（cron 调用）
-    api.registerTool((ctx) => {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
@@ -828,7 +824,7 @@ const plugin = {
     });
 
     // 18. 规则验证工具（cron 调用）
-    api.registerTool((ctx) => {
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
       const pluginCtx = buildPluginContext(ctx, api);
       const toolLogger = getLogger({
         agentId: pluginCtx.agentId,
@@ -905,78 +901,6 @@ const plugin = {
       return hubFallbackCache.get(agentId) || null;
     }
 
-//    // 1. message_received hook - 保存对话到记忆
-//    api.registerHook(
-//      "message:received",
-//      async (message: any, hookCtx: any) => {
-//        try {
-//          const pluginCtx = buildPluginContext(hookCtx || {}, api);
-//          const hookLogger = getLogger({
-//            agentId: pluginCtx.agentId,
-//            component: 'message_received',
-//            verbose: config.verbose
-//          });
-//
-//          const { memoryHub, knowledgeGraph } = getOrCreateHub(pluginCtx.agentId, pluginCtx);
-//
-//          const result = await messageReceivedHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
-//
-//          if (result.system_prompt_addition) {
-//            hookLogger.hook('message_received', `Enhanced with ${result.memories?.length || 0} memories, ${result.knowledge?.length || 0} knowledge`);
-//          }
-//
-//          return result;
-//        } catch (error: any) {
-//          logger.error('message_received hook failed', error);
-//          return {};
-//        }
-//      },
-//      {
-//        name: "evo-cortex-message-received",
-//        description: "Save conversation to memory and enhance context with knowledge graph",
-//        entry: {
-//          hook: {
-//            name: "evo-cortex-message-received",
-//            description: "Save conversation to memory and enhance context with knowledge graph"
-//          }
-//        }
-//      }
-//    );
-
-//    // 2. message:sent hook - 消息发出后存储记忆、提取概念
-//    api.registerHook(
-//      "message:sent",
-//      async (message: any, hookCtx: any) => {
-//        try {
-//          const pluginCtx = buildPluginContext(hookCtx || {}, api);
-//          const hookLogger = getLogger({
-//            agentId: pluginCtx.agentId,
-//            component: 'message_sent',
-//            verbose: config.verbose
-//          });
-//          const { memoryHub, knowledgeGraph } = getOrCreateHub(pluginCtx.agentId, pluginCtx);
-//
-//          const result = await messageSentHook(message, memoryHub, knowledgeGraph, pluginCtx.agentId, hookLogger);
-//          hookLogger.hook('message_sent', 'Memory stored after message sent');
-//
-//          return result;
-//        } catch (error: any) {
-//          logger.error('message_sent hook failed', error);
-//          return {};
-//        }
-//      },
-//      {
-//        name: "evo-cortex-message-sent",
-//        description: "Store memory and extract concepts after message sent",
-//        entry: {
-//          hook: {
-//            name: "evo-cortex-message-sent",
-//            description: "Store memory and extract concepts after message sent"
-//          }
-//        }
-//      }
-//    );
-//
     // ========== Hooks ==========
 
     // 1. message:received — 极简版：注入用户偏好 + 最近记忆标题摘要（<5ms，不搜索不写入）
@@ -1037,20 +961,6 @@ const plugin = {
       } catch {
         return null;
       }
-    }
-
-    // 判断是否是真实对话（过滤 cron、系统事件、工具调用等噪声）
-    function isRealConversation(text: string): boolean {
-      if (!text || text.length < 5) return false;
-      if (text.includes('[cron:') || text.includes('[SCRIPT MODE]')) return false;
-      if (text.includes('[toolCall]') || text.includes('[toolResult]')) return false;
-      if (text.includes('Sender (untrusted metadata)')) return false;
-      if (text.includes('openclaw-tui') || text.includes('openclaw-control-ui')) return false;
-      const trimmed = text.trim();
-      if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-          (trimmed.startsWith('[') && trimmed.endsWith(']'))) return false;
-      if (text.length > 2000) return false;
-      return true;
     }
 
     // 轻量级 shouldEnhance 判断（内联版本，避免导入 hooks 模块）
@@ -1195,7 +1105,7 @@ const plugin = {
                     remainingTimeout()
                   ]) as any[];
                   if (knowledge && knowledge.length > 0) {
-                    const kgLines = knowledge.slice(0, 3).map((k: any, i: number) => {
+                    const kgLines = knowledge.slice(0, 3).map((k: any, _i: number) => {
                       const name = k.entity?.name || k.name || '未知';
                       const type = k.entity?.type || k.type || 'unknown';
                       const desc = (k.entity?.description || k.description || '').substring(0, 150);

@@ -169,7 +169,7 @@ export class QualityScorer {
   /**
    * 筛选低质量内容
    */
-  filterLowQuality<T>(
+  filterLowQuality<_T>(
     items: Array<{ id: string; content: string; metadata: any }>,
     scorer: (content: string, metadata: any) => QualityScore,
     threshold?: number

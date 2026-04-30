@@ -87,7 +87,6 @@ const DEFAULT_CONFIG: RagEvalConfig = {
 // ========== RAG 评估器 ==========
 
 export class RagEvaluator {
-  private ctx: PluginContext;
   private config: RagEvalConfig;
   private metrics: RetrievalMetrics[] = [];
   private currentParams: TuningParams;
@@ -95,7 +94,6 @@ export class RagEvaluator {
   private storagePath: string;
 
   constructor(ctx: PluginContext, config?: Partial<RagEvalConfig>) {
-    this.ctx = ctx;
     this.config = { ...DEFAULT_CONFIG, ...config };
 
     // 初始检索参数
@@ -169,7 +167,6 @@ export class RagEvaluator {
 
     // 计算综合质量分数
     const avgQuality = this.calculateQualityScore(window);
-    const qualityTrend = this.detectTrend(window);
     const recommendations: string[] = [];
     const changes: TuningChange[] = [];
 

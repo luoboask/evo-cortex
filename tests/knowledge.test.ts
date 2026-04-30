@@ -1,26 +1,26 @@
 /**
- * Knowledge Graph Unit Tests
+ * Knowledge System Unit Tests
  */
-import { KnowledgeGraph } from "../src/knowledge/knowledge_graph";
+import { KnowledgeSystem } from "../src/knowledge/knowledge_system";
 import * as fs from "fs";
 import * as path from "path";
 
 // 测试目录
 const TEST_DIR = "knowledge/test-agent";
+const TEST_DATA_DIR = TEST_DIR;
 
-describe("KnowledgeGraph", () => {
-  let knowledgeGraph: KnowledgeGraph;
+describe("KnowledgeSystem", () => {
+  let knowledgeSystem: KnowledgeSystem;
 
   beforeEach(() => {
-    // 清理测试目录
     if (fs.existsSync(TEST_DIR)) {
       fs.rmSync(TEST_DIR, { recursive: true });
     }
-    knowledgeGraph = new KnowledgeGraph("test-agent");
+    knowledgeSystem = new KnowledgeSystem("test-agent", TEST_DATA_DIR);
+    knowledgeSystem.init().catch(() => {});
   });
 
   afterEach(() => {
-    // 清理测试目录
     if (fs.existsSync(TEST_DIR)) {
       fs.rmSync(TEST_DIR, { recursive: true });
     }
@@ -28,35 +28,22 @@ describe("KnowledgeGraph", () => {
 
   describe("addEntity", () => {
     it("should add an entity", async () => {
-      const entity = await knowledgeGraph.addEntity({
+      const entity = await knowledgeSystem.addEntity({
         name: "TypeScript",
         type: "programming",
-        createdAt: new Date().toISOString()
       });
 
       expect(entity.id).toBeDefined();
       expect(entity.name).toBe("TypeScript");
       expect(entity.type).toBe("programming");
     });
-
-    it("should persist entity to file", async () => {
-      await knowledgeGraph.addEntity({
-        name: "JavaScript",
-        type: "programming",
-        createdAt: new Date().toISOString()
-      });
-
-      const entitiesFile = path.join(TEST_DIR, "entities.json");
-
-      expect(fs.existsSync(entitiesFile)).toBe(true);
-    });
   });
 
   describe("addEntities", () => {
     it("should add multiple entities", async () => {
-      const entities = await knowledgeGraph.addEntities([
-        { name: "React", type: "programming", createdAt: new Date().toISOString() },
-        { name: "Vue", type: "programming", createdAt: new Date().toISOString() }
+      const entities = await knowledgeSystem.addEntities([
+        { name: "React", type: "programming" },
+        { name: "Vue", type: "programming" }
       ]);
 
       expect(entities.length).toBe(2);
@@ -65,19 +52,17 @@ describe("KnowledgeGraph", () => {
 
   describe("addRelation", () => {
     it("should add a relation between entities", async () => {
-      const e1 = await knowledgeGraph.addEntity({
+      const e1 = await knowledgeSystem.addEntity({
         name: "Node.js",
         type: "programming",
-        createdAt: new Date().toISOString()
       });
 
-      const e2 = await knowledgeGraph.addEntity({
+      const e2 = await knowledgeSystem.addEntity({
         name: "JavaScript",
         type: "programming",
-        createdAt: new Date().toISOString()
       });
 
-      const relation = await knowledgeGraph.addRelation({
+      const relation = await knowledgeSystem.addRelation({
         from: e1.id,
         to: e2.id,
         type: "depends_on"
@@ -90,32 +75,29 @@ describe("KnowledgeGraph", () => {
 
   describe("search", () => {
     it("should find entities by query", async () => {
-      await knowledgeGraph.addEntity({
+      await knowledgeSystem.addEntity({
         name: "Machine Learning",
         type: "science",
-        createdAt: new Date().toISOString()
       });
 
-      const results = await knowledgeGraph.search("Machine");
+      const results = await knowledgeSystem.searchEntities("Machine");
 
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].entity.name).toBe("Machine Learning");
     });
 
     it("should filter by domain", async () => {
-      await knowledgeGraph.addEntity({
+      await knowledgeSystem.addEntity({
         name: "React",
         type: "programming",
-        createdAt: new Date().toISOString()
       });
 
-      await knowledgeGraph.addEntity({
+      await knowledgeSystem.addEntity({
         name: "Physics",
         type: "science",
-        createdAt: new Date().toISOString()
       });
 
-      const results = await knowledgeGraph.search("React", "science");
+      const results = await knowledgeSystem.searchEntities("React", "science");
 
       expect(results.length).toBe(0);
     });
@@ -123,20 +105,19 @@ describe("KnowledgeGraph", () => {
 
   describe("getEntity", () => {
     it("should retrieve an entity by id", async () => {
-      const added = await knowledgeGraph.addEntity({
+      const added = await knowledgeSystem.addEntity({
         name: "TestEntity",
         type: "other",
-        createdAt: new Date().toISOString()
       });
 
-      const retrieved = await knowledgeGraph.getEntity(added.id);
+      const retrieved = await knowledgeSystem.getEntity(added.id);
 
       expect(retrieved).not.toBeNull();
       expect(retrieved?.name).toBe("TestEntity");
     });
 
     it("should return null for non-existent id", async () => {
-      const retrieved = await knowledgeGraph.getEntity("nonexistent");
+      const retrieved = await knowledgeSystem.getEntity("nonexistent");
 
       expect(retrieved).toBeNull();
     });
@@ -144,17 +125,16 @@ describe("KnowledgeGraph", () => {
 
   describe("deleteEntity", () => {
     it("should delete an entity", async () => {
-      const entity = await knowledgeGraph.addEntity({
+      const entity = await knowledgeSystem.addEntity({
         name: "ToDelete",
         type: "other",
-        createdAt: new Date().toISOString()
       });
 
-      const deleted = await knowledgeGraph.deleteEntity(entity.id);
+      const deleted = await knowledgeSystem.deleteEntity(entity.id);
 
       expect(deleted).toBe(true);
 
-      const retrieved = await knowledgeGraph.getEntity(entity.id);
+      const retrieved = await knowledgeSystem.getEntity(entity.id);
       expect(retrieved).toBeNull();
     });
   });
@@ -163,7 +143,7 @@ describe("KnowledgeGraph", () => {
     it("should extract entities from text", async () => {
       const text = "TypeScript is a typed superset of JavaScript that compiles to plain JavaScript.";
 
-      const entities = await knowledgeGraph.extractEntitiesFromText(text);
+      const entities = await knowledgeSystem.extractEntitiesFromText(text);
 
       expect(entities.length).toBeGreaterThan(0);
     });
@@ -171,10 +151,10 @@ describe("KnowledgeGraph", () => {
 
   describe("getStats", () => {
     it("should return correct statistics", async () => {
-      await knowledgeGraph.addEntity({ name: "E1", type: "programming", createdAt: new Date().toISOString() });
-      await knowledgeGraph.addEntity({ name: "E2", type: "science", createdAt: new Date().toISOString() });
+      await knowledgeSystem.addEntity({ name: "E1", type: "programming" });
+      await knowledgeSystem.addEntity({ name: "E2", type: "science" });
 
-      const stats = knowledgeGraph.getStats();
+      const stats = await knowledgeSystem.getStats();
 
       expect(stats.entities).toBe(2);
     });

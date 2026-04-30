@@ -10,7 +10,6 @@ import { Logger } from '../utils/logger';
 
 // Dynamic require for sqlite3 (ESM compat)
 const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
-const Database = sqlite3.Database;
 
 interface ScanState {
   processed_sessions: string[];
@@ -147,19 +146,6 @@ function ensureTables(db: any): void {
   `);
 }
 
-function insertWorkingMemory(db: any, sessionId: string, content: string, messageCount: number): number | null {
-  const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
-  try {
-    const stmt = db.prepare(
-      "INSERT INTO working_memory (session_id, content, created_at, expires_at, message_count) VALUES (?, ?, datetime('now'), ?, ?)"
-    );
-    stmt.run(sessionId, content, expiresAt, messageCount);
-    return (db as any).lastID;
-  } catch {
-    return null;
-  }
-}
-
 function insertSessionMessages(db: any, sessionId: string, messages: Array<{ role: string; content: string }>): number {
   let count = 0;
   try {
@@ -201,7 +187,7 @@ export interface ScanResult {
 }
 
 export async function scanNewSessions(
-  agentId: string,
+  _agentId: string,
   dataDir: string,
   sessionsPath: string,
   prefFile: string,
@@ -257,11 +243,6 @@ export async function scanNewSessions(
       state.processed_sessions.push(sessionId);
       continue;
     }
-
-    const wmContent = messages
-      .filter(m => m.content.length < 5000)
-      .map(m => `[${m.role}]: ${m.content.substring(0, 500)}`)
-      .join('\n\n');
 
     // 不再写入 working_memory — hook 已通过 MemorySystem.record() 实时写入 memory.db
     // scanner 仅保留 session_messages 存档 + preferences 提取

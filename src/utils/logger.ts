@@ -107,7 +107,7 @@ export function getLogger(options: LoggerOptions = {}): Logger {
  * 设置全局 verbose 模式
  */
 export function setVerboseMode(verbose: boolean): void {
-  for (const [key, logger] of loggers.entries()) {
+  for (const [key, _logger] of loggers.entries()) {
     // 重建日志器以更新 verbose 设置
     const options = key.split(':');
     loggers.set(key, new Logger({
