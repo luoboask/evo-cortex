@@ -24,12 +24,13 @@ const sharedMemoryIndexers = new Map<string, MemoryIndexer>();
 
 function getOrCreateSharedMemoryIndexer(ctx: PluginContext): MemoryIndexer {
   const agentId = ctx.agentId;
-  if (!sharedMemoryIndexers.has(agentId)) {
-    const indexer = new MemoryIndexer(ctx);
+  let indexer = sharedMemoryIndexers.get(agentId);
+  if (!indexer) {
+    indexer = new MemoryIndexer(ctx);
     indexer.init();
     sharedMemoryIndexers.set(agentId, indexer);
   }
-  return sharedMemoryIndexers.get(agentId)!;
+  return indexer;
 }
 
 // 全局标志：确保废弃警告只显示一次
@@ -156,34 +157,40 @@ const plugin = {
     // 延迟初始化：在第一次搜索时按 agentId 创建
     const initIndexBuilder = (pluginCtx: PluginContext) => {
       const agentId = pluginCtx.agentId;
-      if (sharedIndexBuilders.has(agentId)) return sharedIndexBuilders.get(agentId)!;
-      try {
-        const builder = new IndexBuilder(pluginCtx);
-        sharedIndexBuilders.set(agentId, builder);
-        return builder;
-      } catch {
-        return null;
+      let builder = sharedIndexBuilders.get(agentId);
+      if (!builder) {
+        try {
+          builder = new IndexBuilder(pluginCtx);
+          sharedIndexBuilders.set(agentId, builder);
+        } catch {
+          return null;
+        }
       }
+      return builder;
     };
 
     // Agent-isolated SessionScanner singletons: one per agent
     const sharedScanners = new Map<string, SessionScanner>();
     function getOrCreateScanner(agentId: string, workspaceDir: string): SessionScanner {
-      if (!sharedScanners.has(agentId)) {
+      let scanner = sharedScanners.get(agentId);
+      if (!scanner) {
         const ctx = { agentId, workspaceDir, storageBaseDir: process.env.HOME || '/tmp' } as any;
-        sharedScanners.set(agentId, new SessionScanner(ctx));
+        scanner = new SessionScanner(ctx);
+        sharedScanners.set(agentId, scanner);
       }
-      return sharedScanners.get(agentId)!;
+      return scanner;
     }
 
     // Agent-isolated EvolutionScheduler singletons
     const sharedSchedulers = new Map<string, EvolutionScheduler>();
     function getOrCreateScheduler(agentId: string, workspaceDir: string): EvolutionScheduler {
-      if (!sharedSchedulers.has(agentId)) {
+      let scheduler = sharedSchedulers.get(agentId);
+      if (!scheduler) {
         const ctx = { agentId, workspaceDir, storageBaseDir: process.env.HOME || '/tmp' } as any;
-        sharedSchedulers.set(agentId, new EvolutionScheduler(ctx, config.evolution));
+        scheduler = new EvolutionScheduler(ctx, config.evolution);
+        sharedSchedulers.set(agentId, scheduler);
       }
-      return sharedSchedulers.get(agentId)!;
+      return scheduler;
     }
 
     // ========== 注册工具 ==========
@@ -978,26 +985,27 @@ const plugin = {
     // ========== 统一实例缓存（MemorySystem 为主，KnowledgeSystem 共享）==========
     const msCache = new Map<string, MemorySystem>();
     const ksCache = new Map<string, KnowledgeSystem>();
-    const hubFallbackCache = new Map<string, MemoryHub>(); // 仅用于 markdown 回退
     const hubCache = new Map<string, MemoryHub>();
 
     function getOrCreateHub(agentId: string, workspaceDir: string): MemoryHub | null {
-      if (!hubCache.has(agentId)) {
+      let hub = hubCache.get(agentId);
+      if (!hub) {
         try {
           const pluginCtx = { agentId, workspaceDir, storageBaseDir: process.env.HOME || '/tmp' } as any;
-          const hub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
+          hub = new MemoryHub(pluginCtx, config.memory || {}, config.embedding, config.retention);
           hubCache.set(agentId, hub);
         } catch { return null; }
       }
-      return hubCache.get(agentId) || null;
+      return hub;
     }
 
     function getOrCreateMemory(agentId: string, workspaceDir: string): { ms: MemorySystem | null; ks: KnowledgeSystem | null } {
       // MemorySystem
-      if (!msCache.has(agentId)) {
+      let ms: MemorySystem | undefined = msCache.get(agentId);
+      if (!ms) {
         try {
           const dataDir = path.join(workspaceDir, 'data');
-          const ms = new MemorySystem(agentId, dataDir, workspaceDir);
+          ms = new MemorySystem(agentId, dataDir, workspaceDir);
           ms.init().catch(e => getLogger({ agentId, component: 'memory_system' }).warn(`MemorySystem init failed: ${e.message}`));
           try {
             const indexer = getOrCreateSharedMemoryIndexer({ agentId, workspaceDir } as any);
@@ -1009,26 +1017,16 @@ const plugin = {
         } catch { /* ignore */ }
       }
       // KnowledgeSystem
-      if (!ksCache.has(agentId)) {
+      let ks: KnowledgeSystem | undefined = ksCache.get(agentId);
+      if (!ks) {
         try {
           const dataDir = path.join(workspaceDir, 'data');
-          const ks = new KnowledgeSystem(agentId, dataDir);
+          ks = new KnowledgeSystem(agentId, dataDir);
           ks.init().catch(e => getLogger({ agentId, component: 'knowledge_system' }).warn(`KnowledgeSystem init failed: ${e.message}`));
           ksCache.set(agentId, ks);
         } catch { /* ignore */ }
       }
       return { ms: msCache.get(agentId) || null, ks: ksCache.get(agentId) || null };
-    }
-
-    /** MemoryHub fallback — 仅用于 markdown 文件回退读取 */
-    function getOrCreateHubFallback(agentId: string, pluginCtx: any): MemoryHub | null {
-      if (!hubFallbackCache.has(agentId)) {
-        try {
-          const hub = new MemoryHub(pluginCtx, config.memory, config.embedding, config.retention);
-          hubFallbackCache.set(agentId, hub);
-        } catch { return null; }
-      }
-      return hubFallbackCache.get(agentId) || null;
     }
 
     // ========== Hooks ==========
@@ -1207,13 +1205,29 @@ const plugin = {
                   throw new Error('MemorySystem unavailable');
                 }
               } catch {
-                // MemorySystem 不可用，回退到 MemoryHub
-                const hub = getOrCreateHubFallback(agentId, { agentId, workspaceDir } as any);
-                if (hub) {
-                  memories = await Promise.race([
-                    hub.search(userContent, 3),
-                    remainingTimeout()
-                  ]) as any[];
+                // MemorySystem 不可用，直接查询 memory.db（A3 修复）
+                const dataDir = path.join(workspaceDir, 'data', agentId);
+                const memDbPath = path.join(dataDir, 'memory.db');
+                if (fs.existsSync(memDbPath)) {
+                  const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
+                  const db = new sqlite3.Database(memDbPath, sqlite3.OPEN_READONLY);
+                  try {
+                    const terms = userContent.split(/\s+/).filter(Boolean).slice(0, 3);
+                    const likes = terms.map((_t: string) => `content LIKE ?`).join(' OR ');
+                    const params = terms.flatMap((t: string) => `%${t}%`);
+                    memories = await Promise.race([
+                      new Promise<any[]>((resolve, reject) => {
+                        db.all(
+                          `SELECT id, type, title, content, importance FROM working_memory WHERE ${likes} ORDER BY importance DESC LIMIT 3`,
+                          params,
+                          (err: Error | null, rows: any[]) => err ? reject(err) : resolve(rows || [])
+                        );
+                      }),
+                      remainingTimeout()
+                    ]) as any[];
+                  } finally {
+                    db.close();
+                  }
                 }
               }
 
@@ -1358,6 +1372,8 @@ const plugin = {
               sourceRef: agentId,
             }).catch((err: any) => logger.debug(`record failed: ${err.message}`));
             logger.info(`agent_end: recorded pair (user=${lastUserMsg.length > 0}, ai=${lastAiMsg.length > 0})`);
+
+            // 知识自动提取需通过 consolidate_memory 工具（从 LTM 到 knowledge.db）
 
             // 持久化到 memory/*.md（异步，不阻塞回复）
             try {
