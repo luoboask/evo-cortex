@@ -43,16 +43,6 @@ def consolidate():
 
     db = get_db(MEMORY_DB)
     try:
-        # 标记过期（24 小时前的条目）
-        db.execute("""
-            UPDATE working_memory 
-            SET expires_at = strftime('%Y-%m-%dT%H:%M:%SZ', datetime('now', '-1 second'))
-            WHERE expires_at IS NULL 
-              AND created_at < datetime('now', '-24 hours')
-              AND importance >= 5.0
-        """)
-        db.commit()
-
         # 晋升（最新 100 条之后的，importance 达标即晋升）
         rows = db.execute("""
             SELECT * FROM working_memory 

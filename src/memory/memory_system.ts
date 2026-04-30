@@ -196,9 +196,7 @@ export class MemorySystem {
    * 记录一条记忆到 working_memory
    * 1. 生成 ID
    * 2. 计算重要性
-   * 3. 写入 working_memory（expires_at = now + 24h）
-   *    - 同一 sourceRef 的最近记录：先刷新过期时间（避免无限膨胀）
-   *    - 新 sourceRef：正常插入新记录
+   * 3. 写入 working_memory
    * 4. 异步触发后续处理（不阻塞）
    */
   async record(entry: MemoryEntry): Promise<string> {
@@ -207,27 +205,13 @@ export class MemorySystem {
     const importance = this.scoreImportance(entry);
     const tags = JSON.stringify(entry.tags || []);
     const now = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-
-    // 如果 sourceRef 存在，先刷新同源的最近记录（只更新过期时间）
-    if (entry.sourceRef) {
-      try {
-        await this.runAsync(
-          `UPDATE working_memory SET expires_at = ? WHERE source_ref = ? AND expires_at >= datetime('now', '-2 hours')`,
-          [expiresAt, entry.sourceRef]
-        );
-      } catch {
-        // UPDATE 失败不影响 INSERT
-      }
-    }
-
     const id = `wm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     return new Promise<string>((resolve, reject) => {
       this.db.run(
-        `INSERT INTO working_memory (id, type, title, content, importance, tags, source, source_ref, created_at, expires_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [id, entry.type, entry.title || '', entry.content, importance, tags, entry.source, entry.sourceRef || null, now, expiresAt],
+        `INSERT INTO working_memory (id, type, title, content, importance, tags, source, source_ref, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [id, entry.type, entry.title || '', entry.content, importance, tags, entry.source, entry.sourceRef || null, now],
         (err: Error | null) => {
           if (err) {
             reject(new Error(`MemorySystem.record failed: ${err.message}`));
@@ -272,29 +256,6 @@ export class MemorySystem {
       score += KEYWORD_BONUS;
     }
     return Math.min(score, MAX_SCORE);
-  }
-
-  // ========== 活跃刷新 ==========
-
-  /**
-   * 刷新工作记忆过期时间
-   * UPDATE working_memory SET expires_at = now + 24h WHERE source_ref = sessionId
-   */
-  async refreshWorkingMemory(sessionId: string): Promise<void> {
-    await this.ensureInit();
-
-    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-
-    return new Promise<void>((resolve, reject) => {
-      this.db.run(
-        `UPDATE working_memory SET expires_at = ? WHERE source_ref = ?`,
-        [expiresAt, sessionId],
-        (err: Error | null) => {
-          if (err) reject(new Error(`refreshWorkingMemory failed: ${err.message}`));
-          else resolve();
-        }
-      );
-    });
   }
 
   // ========== 晋升：工作 → 长期 ==========
@@ -744,12 +705,11 @@ export class MemorySystem {
       }
     }
 
-    // 2. 从 working_memory 读取最近未过期的记录（最多 5 条）
+    // 2. 从 working_memory 读取最近记录（最多 5 条，按重要性排序）
     const wmEntries = await new Promise<any[]>((resolve) => {
       this.db.all(
         `SELECT id, type, title, content, importance, source, created_at
          FROM working_memory
-         WHERE expires_at IS NULL OR expires_at > datetime('now')
          ORDER BY importance DESC, created_at DESC
          LIMIT 5`,
         [],
@@ -786,27 +746,25 @@ export class MemorySystem {
     return parts.join('\n');
   }
 
-  /** 清理过期工作记忆（替代 MemoryHub.cleanup 的 SQLite 版本） */
-  cleanupWorkingMemory(): { deleted: number } {
+  /** 清理低重要性工作记忆（替代 MemoryHub.cleanup 的 SQLite 版本） */
+  cleanupWorkingMemory(threshold: number = 3): { deleted: number } {
     if (!this.initialized || !this.db) return { deleted: 0 };
 
     try {
-      // 删除已过期的工作记忆（但保护最新 100 条未过期的）
+      // 删除低重要性记录（保护最新 100 条）
       this.db.exec(`
         DELETE FROM working_memory
-        WHERE expires_at < datetime('now')
+        WHERE importance < ${threshold}
           AND id NOT IN (
             SELECT id FROM working_memory
-            WHERE expires_at >= datetime('now')
             ORDER BY created_at DESC LIMIT 100
           )
       `);
+      const deleted = this.db.changes;
+      return { deleted };
     } catch (err: any) {
       console.warn(`[MemorySystem] cleanupWorkingMemory failed: ${err.message}`);
       return { deleted: 0 };
     }
-
-    const deleted = this.db.changes;
-    return { deleted };
   }
 }

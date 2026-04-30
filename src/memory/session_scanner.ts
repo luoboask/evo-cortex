@@ -346,6 +346,61 @@ export class SessionScanner {
    * - like: 明确表达过的好感
    * - dislike: 明确表达过的反感
    */
+  /**
+   * 从文本中提取用户偏好（静态方法，供 agent_end 等外部调用）
+   */
+  static extractFromText(content: string): Array<{
+    category: string;
+    key: string;
+    value: string;
+    confidence: number;
+  }> {
+    const prefs: Array<{ category: string; key: string; value: string; confidence: number }> = [];
+    const seen = new Set<string>();
+    const addPref = (category: string, key: string, value: string, confidence: number) => {
+      const normValue = value.trim().replace(/[。！？\n]/g, '').slice(0, 100);
+      if (!normValue || normValue.length < 2) return;
+      const dedupKey = `${category}:${key}:${normValue.toLowerCase()}`;
+      if (seen.has(dedupKey)) return;
+      seen.add(dedupKey);
+      prefs.push({ category, key, value: normValue, confidence });
+    };
+
+    // 明确表达喜好
+    const likePatterns = [
+      { regex: /我\s*(?:比较)?\s*(?:喜欢|偏好|倾向|习惯|更倾向)\s*(?:用|使用)?\s*([^\s，。！？]{2,20})/g, category: 'like', key: 'preference' },
+      { regex: /统一用\s*([^\s，。！]{2,20})/g, category: 'like', key: 'language' },
+    ];
+
+    // 语言偏好（特殊处理）
+    const langPatterns = [
+      { regex: /用\s*(中文|英文|简体中文|繁体中文|日语|韩语)\s*(交流|回复|回答|对话|写|交互)/g, category: 'communication', key: 'language' },
+      { regex: /(中文|英文|简体中文|繁体中文|日语)\s*(优先|为主|默认)/g, category: 'communication', key: 'language' },
+      { regex: /统一用\s*(中文|英文|简体中文|繁体中文)/g, category: 'communication', key: 'language' },
+    ];
+
+    const allPatterns = [
+      ...likePatterns.map(p => ({ ...p })),
+      ...langPatterns,
+    ];
+
+    for (const pattern of allPatterns) {
+      const regex = typeof pattern.regex === 'string' ? new RegExp(pattern.regex, 'gi') : pattern.regex;
+      const matches = content.matchAll(regex);
+      for (const match of matches) {
+        const value = match[1] || match[0];
+        if (value && value.length >= 2 && value.length <= 50) {
+          addPref(pattern.category, pattern.key, value.trim(), pattern.category === 'communication' ? 0.8 : 0.7);
+        }
+      }
+    }
+
+    return prefs;
+  }
+
+  /**
+   * 实例方法：从文本中提取用户偏好（内部调用静态方法）
+   */
   private extractPreferences(content: string): Array<{
     category: string;
     key: string;

@@ -141,13 +141,9 @@ const plugin = {
     }
     deprecationWarningShown = true;
 
-    logger.info(`Plugin registered. Enabled modules: ${getConfigSummary(config)}`);
-    logger.debug(`Workspace: ${api.workspaceDir || 'default'}`);
-
     // 检查并提示配置定时任务（仅在首次加载时）
     if (api.workspaceDir && !isCronConfigured(api.workspaceDir)) {
       checkAndPrompt(api.workspaceDir, 'current-agent');
-      // 标记为已提示，避免每次加载都显示
       markAsConfigured(api.workspaceDir);
     }
 
@@ -1239,7 +1235,8 @@ const plugin = {
           const sessionKey = ctx?.sessionKey || '';
           const parts = sessionKey.split(':');
           const agentId = parts.length >= 2 ? parts[1] : 'main';
-          if (!agentId || agentId === 'main') return;
+          // 允许所有 agent（包括 main）使用此插件
+          if (!agentId) return;
 
           const workspaceDir = path.join(process.env.HOME || '', '.openclaw', `workspace-${agentId}`);
           const logger = getLogger({ component: 'agent_end', agentId });
@@ -1249,25 +1246,37 @@ const plugin = {
           let lastUserMsg = '';
           let lastAiMsg = '';
 
-          // 清洗用户消息：去掉 TUI metadata 头和 code fence，只保留纯文本内容
+          // 清洗用户消息：兼容 TUI、webchat 等多种格式，提取纯文本内容
           const cleanContent = (raw: string): string => {
             const lines = raw.split('\n');
             let inCodeFence = false;
-            let foundTimestamp = false;
             let messageParts: string[] = [];
+            let inSenderBlock = false;
             for (const line of lines) {
               const trimmed = line.trim();
+              // 跳过 code fence
               if (trimmed.startsWith('```')) { inCodeFence = !inCodeFence; continue; }
               if (inCodeFence) continue;
-              if (trimmed.startsWith('Sender')) continue;
-              if (trimmed.startsWith('{') || trimmed.startsWith('"') || trimmed.startsWith('}') || trimmed.endsWith(',')) continue;
-              if (/^\[\w+\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(trimmed)) {
-                foundTimestamp = true;
-                const msg = trimmed.replace(/^\[\w+\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}\s+[^\]]*\]\s*/, '');
-                if (msg) messageParts.push(msg);
+              // 跳过 TUI Sender 元数据块
+              if (trimmed.startsWith('Sender')) { inSenderBlock = true; continue; }
+              if (inSenderBlock) {
+                if (trimmed.startsWith('```') || (trimmed.startsWith('[') && /\d{4}-\d{2}-\d{2}/.test(trimmed))) {
+                  inSenderBlock = false;
+                  // 如果是时间戳行，继续处理
+                } else {
+                  continue;
+                }
+              }
+              // 跳过 JSON 元数据
+              if (trimmed.startsWith('{') || trimmed.startsWith('}') || trimmed.startsWith('"') || trimmed.endsWith(',')) continue;
+              // 识别时间戳行：提取时间戳后面的消息正文
+              const tsMatch = trimmed.match(/^\[\w+\s+\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}[\s\w:+-]*\]\s*(.*)/);
+              if (tsMatch) {
+                if (tsMatch[1]) messageParts.push(tsMatch[1]);
                 continue;
               }
-              if (foundTimestamp) messageParts.push(trimmed);
+              // 收集正文行
+              if (trimmed.length > 0) messageParts.push(trimmed);
             }
             const cleaned = messageParts.join(' ').trim();
             return cleaned || raw;
@@ -1321,6 +1330,33 @@ const plugin = {
             } catch (err: any) {
               logger.debug(`persist skipped: ${err.message}`);
             }
+          }
+
+          // --- 当前会话偏好提取（不依赖 session scanner）---
+          try {
+            if (lastUserMsg && lastUserMsg.length > 5) {
+              const prefs = SessionScanner.extractFromText(lastUserMsg);
+              if (prefs.length > 0) {
+                const dataDir = getDataDir({ agentId } as any);
+                const kgPath = path.join(dataDir, 'knowledge.db');
+                if (fs.existsSync(kgPath)) {
+                  const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
+                  const db = new sqlite3.Database(kgPath);
+                  for (const pref of prefs) {
+                    const prefId = `${pref.category}:${pref.key}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`;
+                    db.run(
+                      `INSERT OR REPLACE INTO preferences (id, category, value, confidence, source, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, 'agent_end', strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))`,
+                      [prefId, pref.category, pref.value, pref.confidence]
+                    );
+                  }
+                  db.close();
+                  logger.info(`agent_end: extracted ${prefs.length} pref(s) from current message: ${prefs.map(p => `[${p.category}] ${p.value}`).join(', ')}`);
+                }
+              }
+            }
+          } catch (err: any) {
+            logger.debug(`agent_end: preference extraction skipped: ${err.message}`);
           }
 
           // --- session scanner：每次 agent_end 都跑，fire-and-forget ---
@@ -1382,8 +1418,7 @@ const plugin = {
     process.once('SIGTERM', cleanupPrefDbCache);
     process.once('SIGINT', cleanupPrefDbCache);
 
-    logger.info('Use openclaw cron to configure scheduled tasks');
-    logger.info('All tools, hooks, and crons registered successfully');
+    logger.debug('All tools, hooks, and crons registered successfully');
   },
 };
 
