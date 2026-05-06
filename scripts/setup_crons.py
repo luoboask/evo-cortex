@@ -52,7 +52,7 @@ def main():
             "name": "nightly-evolution",
             "cron": "0 23 * * *",
             "message": f"执行夜间进化。运行: python3 {scripts_dir}/activate-evolution.py {agent_name}",
-            "timeout": 90,
+            "timeout": 300,
         },
         {
             "name": "active-learning",
@@ -64,7 +64,7 @@ def main():
             "name": "daily-review",
             "cron": "0 9 * * *",
             "message": f"执行: python3 {scripts_dir}/kg_auto_update.py {agent_name}",
-            "timeout": 60,
+            "timeout": 180,
         },
         {
             "name": "monthly-cycle",
@@ -82,13 +82,13 @@ def main():
             "name": "weekly-kg-expansion",
             "cron": "0 5 * * 0",
             "message": f"执行知识图谱扩展。运行: python3 {scripts_dir}/kg_auto_update.py {agent_name}",
-            "timeout": 90,
+            "timeout": 180,
         },
         {
             "name": "daily-compress",
             "cron": "30 9 * * *",
             "message": f"执行记忆压缩。调用工具：memory_compress {{\"granularity\": \"daily\"}}",
-            "timeout": 90,
+            "timeout": 180,
         },
     ]
 

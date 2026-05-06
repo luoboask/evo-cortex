@@ -51,7 +51,7 @@ def main():
         ''', (week_ago,)).fetchall()
 
         wm_rows = conn.execute('''
-            SELECT title, content, type FROM working_memory WHERE created_at >= ? LIMIT 100
+            SELECT NULL as title, content, NULL as type FROM working_memory WHERE created_at >= ? LIMIT 100
         ''', (week_ago,)).fetchall()
     finally:
         conn.close()

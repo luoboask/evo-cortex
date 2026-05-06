@@ -98,6 +98,27 @@ else
     echo "   ✅ 插件已安装"
 fi
 
+# 注册 agent（如果尚未注册）
+if [ "$LANG" = "zh" ]; then
+    echo "📦 检查 Agent 注册状态..."
+else
+    echo "📦 Checking agent registration..."
+fi
+
+if ! openclaw agents list 2>/dev/null | grep -q "^- $AGENT_NAME\b"; then
+    if [ "$LANG" = "zh" ]; then
+        echo "⚠️  Agent 未注册，正在注册..."
+    else
+        echo "⚠️  Agent not registered, registering..."
+    fi
+    openclaw agents add "$AGENT_NAME" --workspace "$WORKSPACE_ROOT" --non-interactive >/dev/null 2>&1
+    echo "   ✅ Agent 注册完成"
+else
+    echo "   ✅ Agent 已注册"
+fi
+
+echo ""
+
 # 配置定时任务
 echo ""
 if [ "$LANG" = "zh" ]; then

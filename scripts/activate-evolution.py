@@ -113,12 +113,13 @@ class EvolutionEventExtractor:
             remaining = limit - len(events)
             if remaining > 0:
                 cur.execute('''
-                    SELECT id, type, title, content, importance, tags, source, source_ref, created_at
+                    SELECT id, NULL as type, NULL as title, content,
+                           NULL as importance, '' as tags, NULL as source,
+                           session_id as source_ref, created_at
                     FROM working_memory
-                    WHERE importance >= ?
-                      AND content IS NOT NULL AND content != ''
-                    ORDER BY importance DESC, created_at DESC
-                ''', (min_importance,))
+                    WHERE content IS NOT NULL AND content != ''
+                    ORDER BY created_at DESC
+                ''')
 
                 for row in cur.fetchall():
                     if len(events) >= limit:
@@ -141,28 +142,30 @@ class EvolutionEventExtractor:
         title = entry.get('title', '')
         combined = f"{title} {content}"
         
+        imp = entry.get('importance') or 0
+
         for event_type, keywords in self.EVENT_PATTERNS.items():
             if any(kw in combined for kw in keywords):
                 return {
                     'type': event_type,
                     'title': title,
                     'content': content[:500],
-                    'importance': entry.get('importance', 0),
-                    'tags': entry.get('tags', ''),
-                    'source_ref': entry.get('source_ref', ''),
-                    'created_at': entry.get('created_at', '')
+                    'importance': imp,
+                    'tags': entry.get('tags') or '',
+                    'source_ref': entry.get('source_ref') or '',
+                    'created_at': entry.get('created_at') or ''
                 }
-        
+
         # 高重要性但未匹配关键词 → insight
-        if entry.get('importance', 0) >= 7.0:
+        if imp >= 7.0:
             return {
                 'type': 'insight',
                 'title': title,
                 'content': content[:500],
-                'importance': entry.get('importance', 0),
-                'tags': entry.get('tags', ''),
-                'source_ref': entry.get('source_ref', ''),
-                'created_at': entry.get('created_at', '')
+                'importance': imp,
+                'tags': entry.get('tags') or '',
+                'source_ref': entry.get('source_ref') or '',
+                'created_at': entry.get('created_at') or ''
             }
         
         return None
