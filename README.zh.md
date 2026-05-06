@@ -1,289 +1,245 @@
-# 🧬 Evo-Cortex
+# Evo-Cortex
 
 > **给您的智能体一个大脑** — 为 OpenClaw 智能体提供持久记忆、持续学习和进化能力。
 
 [![Version](https://img.shields.io/npm/v/@evo-agents/evo-cortex?color=blue&logo=npm)](https://www.npmjs.com/package/@evo-agents/evo-cortex)
-[![npm downloads](https://img.shields.io/npm/dm/@evo-agents/evo-cortex?logo=npm)](https://www.npmtrends.com/@evo-agents/evo-cortex)
 [![License](https://img.shields.io/npm/l/@evo-agents/evo-cortex?color=green)](./LICENSE)
-[![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.3.13+-orange?logo=openclaw)](https://github.com/openclaw/openclaw)
-[![CI/CD](https://github.com/luoboask/evo-cortex/actions/workflows/ci.yml/badge.svg)](https://github.com/luoboask/evo-cortex/actions)
+[![OpenClaw](https://img.shields.io/badge/OpenClaw-2026.3.24--beta.2+-orange?logo=openclaw)](https://github.com/openclaw/openclaw)
 [![GitHub stars](https://img.shields.io/github/stars/luoboask/evo-cortex?style=social)](https://github.com/luoboask/evo-cortex/stargazers)
 
-**[🇺🇸 English](./README.md)** • **[📚 完整文档](./docs/)** • **[🚀 快速开始](#-快速开始)**
+**[English](./README.md)** · **[完整文档](./docs/)** · **[快速开始](#-快速开始)**
 
 ---
 
-## 🎯 什么是 Evo-Cortex？
+## 什么是 Evo-Cortex？
 
 Evo-Cortex 将 AI 智能体从**被动应答者**转变为**主动学习者**。它提供完整的大脑系统，包括持久记忆、经验提炼、知识图谱和自动化进化周期。
 
 ### 为什么选择 Evo-Cortex？
 
-| 问题 | 解决方案 | 效果 |
-|------|----------|------|
-| ❌ 智能体每次会话后忘记一切 | ✅ **持久记忆** + 语义搜索 | 跨会话记住上下文 |
-| ❌ 无法从重复经验中学习 | ✅ **经验提炼** 提取元规则 | 随时间变得更智慧 |
-| ❌ 知识杂乱无章 | ✅ **知识图谱** 自动构建关系 | 结构化智慧积累 |
-| ❌ 能力静态不变 | ✅ **进化调度器** 运行 9 个改进任务 | 持续自我优化 |
+| 问题 | 解决方案 |
+|------|----------|
+| 智能体每次会话后忘记一切 | **持久记忆** + 语义搜索 |
+| 无法从重复经验中学习 | **经验提炼** 自动提取元规则 |
+| 知识杂乱无章 | **知识图谱** 自动构建关系 |
+| 能力静态不变 | **进化调度器** 持续自我优化 |
 
 ### 关键成果
 
 ```
-💰 成本降低：       78% ↓  (混合 Script+LLM 执行)
-⚡ 速度提升：       98% ↑  (95% 任务 <1 秒)
-🧠 记忆召回：       全新    (<100ms 语义搜索)
-📈 学习速率：       ∞      (持续进化)
+成本：  ~$0.00/天  (大部分任务纯脚本执行)
+速度：  95% 任务 <1 秒
+记忆：  <100ms 语义搜索召回
+学习：  持续进化 — 随时间变得更聪明
 ```
 
 ---
 
-## 🚀 快速开始
+## 快速开始
 
 ### 1. 安装
 
 ```bash
-# 通过 npm（推荐）
+# 通过 npm 安装（推荐）
 openclaw plugins install @evo-agents/evo-cortex
+
+# 或直接使用安装脚本
+bash ~/.openclaw/extensions/evo-cortex/scripts/install.sh <你的智能体名称>
 ```
 
 ### 2. 配置
 
+`install.sh` 脚本处理所有步骤：
+
 ```bash
-# 一键配置（完整模式）
-~/.openclaw/extensions/evo-cortex/scripts/quick-setup.sh <your-agent-id>
+bash ~/.openclaw/extensions/evo-cortex/scripts/install.sh my-agent
 ```
+
+**它做了什么：**
+- 创建智能体工作区（`SOUL.md`、`USER.md`、`AGENTS.md` 模板）
+- 向 OpenClaw 注册智能体
+- 初始化记忆和知识数据库
+- 创建 7 个自动化定时任务
 
 ### 3. 验证
 
 ```bash
-# 检查安装
+# 检查插件是否加载
 openclaw plugins list | grep evo-cortex
 
-# 查看活动任务
-~/.openclaw/extensions/evo-cortex/scripts/list-agent-crons.sh <your-agent-id>
+# 查看活动的定时任务
+openclaw cron list | grep <你的智能体ID>
+
+# 或使用辅助脚本
+bash ~/.openclaw/extensions/evo-cortex/scripts/list-agent-crons.sh <你的智能体ID>
 ```
 
-**完成！** 您的智能体现在有了大脑。🧠
+**完成！** 你的智能体现在有了会学习和记忆的大脑。
 
 ---
 
-## ✨ 核心功能
+## 定时任务
 
-### 🧠 持久记忆系统
+| 任务 | 频率 | 用途 |
+|------|------|------|
+| `nightly-evolution` | 每天 | 从高价值记忆中提取元规则 |
+| `active-learning` | 每天 | 模式识别和偏好提取 |
+| `daily-review` | 每天 | 知识图谱健康检查 |
+| `daily-compress` | 每天 | 记忆压缩和整合 |
+| `weekly-compress` | 每周 | 周归档和总结 |
+| `weekly-kg-expansion` | 每周 | 知识图谱扩展 |
+| `monthly-cycle` | 每月 | 全面清理、统计和进化 |
+
+所有任务均为纯脚本运行（无需 LLM 调用）— 运营成本 $0.00/天。
+
+---
+
+## 核心功能
+
+### 持久记忆系统
 
 基于 SQLite 的语义记忆，自动捕获和检索所有会话的上下文。
 
-```typescript
-// 语义搜索记忆
-const results = await search_memory({
-  query: "我们之前讨论过 cron 配置吗？",
-  limit: 5,
-  minScore: 0.4
-});
-// <100ms 返回相关记忆
-```
+- 自动从 JSONL 日志扫描会话
+- 基于嵌入的语义搜索（当可用时）
+- 工作记忆、短期记忆和长期记忆分层
+- 记忆压缩保持数据库精简
 
-**亮点：**
-- 实时更新（每 5 分钟）
-- 自动会话扫描（每 30 分钟）
-- 基于嵌入的语义搜索
-- 零配置要求
+### 知识图谱
 
-### 📚 经验提炼
+从互动中自动构建结构化知识。
+
+- 从对话历史中提取实体
+- 自动发现关系
+- 图谱健康指标（密度、连通性）
+- 每个周期增量更新
+
+### 经验提炼
 
 从重复模式中自动提取元规则和最佳实践。
 
-**输出示例：**
 ```markdown
 ## 规则：动态路径解析
-**何时**: 在脚本中配置路径时  
-**做法**: 使用动态解析而非硬编码  
-**原因**: 跨环境可移植性  
+**何时**: 在脚本中配置路径时
+**做法**: 使用动态解析而非硬编码
+**原因**: 跨环境可移植性
 **置信度**: 98%（观察到 15 次）
 ```
 
-### 🗂️ 知识图谱
+### 进化系统
 
-从互动中构建和可视化结构化知识。
+进化周期确保智能体随时间变得更聪明：
 
-**自动生成统计：**
-```json
-{
-  "实体数": 12,
-  "关系数": 17,
-  "密度": 1.42,
-  "连通性": 0.85,
-  "健康状态": "✅ 优秀"
-}
-```
-
-### 🧬 进化调度器
-
-九个自动化任务确保持续改进：
-
-| 频率 | 任务 | 目的 |
-|------|------|------|
-| 每小时 | `hourly-fractal` | 分形思考分析 |
-| 每 30 分钟 | `session-scan` | 记忆扫描 |
-| 每 5 分钟 | `realtime-index` | 记忆更新 |
-| 每天 09:00 | `daily-review` | 记忆回顾 |
-| 每天 04:00 | `active-learning` | 缺口检测 |
-| 每周日 | `weekly-compress` | 知识整合 |
-| 每月 1 号 | `monthly-cycle` | 进化周期 |
-
-**配置级别：**
-- **基础版** (3 个任务): 最小开销
-- **标准版** (7 个任务): 平衡方案
-- **完整版** ⭐ (9 个任务): 最大智能（默认）
+1. **收集** 记忆中高-importance 事件
+2. **分类** 事件类型（错误、模式、偏好等）
+3. **提炼** 重复模式为元规则
+4. **存储** 带置信度的规则
+5. **应用** 规则到未来行为
 
 ---
 
-## 🛠️ 工具与接口
-
-开箱即用的三个强大工具：
-
-| 工具 | 用途 | 示例 |
-|------|------|------|
-| `search_memory` | 语义记忆搜索 | `search_memory({query: "...", limit: 5})` |
-| `search_knowledge` | 知识图谱查询 | `search_knowledge({entity: "cron"})` |
-| `health_check` | 系统监控 | `health_check({agent: "my-agent"})` |
-
-**工厂模式支持：**
-```typescript
-import { createEvoCortexTools } from '@evo-agents/evo-cortex';
-
-// 自动检测当前智能体
-const tools = createEvoCortexTools();
-
-// 或显式指定
-const tools = createEvoCortexTools({ agentName: 'my-agent' });
-```
-
----
-
-## 📊 性能表现
-
-### 混合执行模式
-
-Evo-Cortex 智能地在快速脚本和创意 LLM 之间路由任务：
+## 架构
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│ 简单任务 (95%) → 脚本模式 → <1 秒，$0.001          │
-│ 复杂任务 (5%)  → LLM 模式   → ~5 秒，$0.05         │
-├─────────────────────────────────────────────────────┤
-│ 结果：降低 78% 成本，提升 98% 速度                  │
+│                    OpenClaw 智能体                    │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
+│  │ memory.db │  │knowledge.│  │  工作区文件       │   │
+│  │          │  │   db     │  │  SOUL/USER/AGENT │   │
+│  └────┬─────┘  └────┬─────┘  └────────┬─────────┘   │
+│       │             │                 │             │
+│  ┌────┴─────────────┴─────────────────┴──────────┐  │
+│  │            定时任务（纯脚本执行）               │  │
+│  │  扫描 → 学习 → 进化 → 压缩 → 扩展              │  │
+│  └────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────┘
 ```
 
-### 基准测试
+### 数据流
 
-| 指标 | 之前 | 之后 | 变化 |
-|------|------|------|------|
-| 单次任务成本 | $0.05 | $0.011 | ↓ 78% |
-| 响应时间 | 5.2s | 0.1s | ↑ 98% |
-| 记忆召回 | 无 | <100ms | ✨ 新 |
-| 学习速率 | 0% | 持续 | ∞ |
+```
+对话 → JSONL 日志 → 会话扫描器 → memory.db
+                                             ↓
+                                       主动学习
+                                             ↓
+                                      knowledge.db
+                                             ↓
+                                       进化系统
+                                             ↓
+                                       元规则
+```
 
 ---
 
-## 📦 包详情
+## 工作区文件
+
+每个智能体工作区包含引导行为的文件：
+
+| 文件 | 用途 |
+|------|------|
+| `SOUL.md` | 智能体人设、内容风格、核心原则 |
+| `USER.md` | 用户画像、目标、偏好 |
+| `AGENTS.md` | 工作区规则、内容指南、质量标准 |
+| `memory.db` | 持久记忆存储 |
+| `knowledge.db` | 知识图谱存储 |
+| `memory/` | 每日 Markdown 记忆文件 |
+| `knowledge/` | 实体和关系导出 |
+| `evolution/` | 主动学习报告和元规则 |
+
+---
+
+## 性能表现
+
+| 指标 | 值 |
+|------|-----|
+| 每天成本 | ~$0.00（脚本任务） |
+| 响应时间 | 大部分操作 <1s |
+| 记忆召回 | <100ms 语义搜索 |
+| 磁盘使用 | 最少 ~100MB |
+| 依赖 | sqlite3, @sinclair/typebox |
+
+---
+
+## 包详情
 
 | 属性 | 值 |
 |------|-----|
 | **包名** | `@evo-agents/evo-cortex` |
-| **版本** | 1.0.0 |
-| **大小** | 64.6 KB（47 个文件） |
-| **依赖** | 0（零依赖！） |
+| **版本** | 1.3.0 |
 | **许可证** | MIT |
-| **兼容性** | OpenClaw 2026.3.13+ |
-
-**系统要求：**
-- Node.js v18+（推荐 v20+）
-- OpenClaw 2026.3.13 或更高版本
-- 最少 100 MB 磁盘空间
+| **兼容性** | OpenClaw 2026.3.24-beta.2+ |
+| **Node.js** | v18+（推荐 v20+） |
 
 ---
 
-## 📚 文档导航
+## 常见问题
 
-| 资源 | 描述 |
-|------|------|
-| **[快速开始](#-快速开始)** | 3 步上手 |
-| **[核心功能](#-核心功能)** | 深入了解功能 |
-| **[API 参考](./docs/API.md)** | 完整工具文档 |
-| **[配置指南](./docs/CONFIG.md)** | 自定义行为 |
-| **[示例集合](./examples/)** | 实际使用案例 |
-| **[常见问题](./docs/FAQ.md)** | 常见疑问解答 |
+**定时任务超时失败？**
+在 `setup_crons.py` 中增加超时时间 — 隔离会话初始化需要更长时间。默认：大部分任务 180s，nightly-evolution 300s。
 
-**更多资源：**
-- [变更日志](./CHANGELOG.md) - 版本历史
-- [路线图](./ROADMAP.md) - 未来规划
-- [贡献指南](./CONTRIBUTING.md) - 参与贡献
-- [安全策略](./SECURITY.md) - 安全说明
+**知识图谱为空？**
+新智能体的正常现象。系统需要对话数据来提取实体。建议活跃使用 1-2 周后查看。
+
+**进化系统找到 0 个事件？**
+新智能体的预期行为。元规则从重复的高价值模式中出现 — 需要先积累足够的对话历史。
+
+**记忆没有被召回？**
+检查会话扫描器是否在运行（`openclaw cron list`）。记忆文件应存在于 `memory/` 目录中。
 
 ---
 
-## 🤝 参与贡献
+## 参与贡献
 
-欢迎各种形式的贡献！
+1. Fork 并克隆: `git clone https://github.com/luoboask/evo-cortex.git`
+2. 创建分支: `git checkout -b feature/your-feature`
+3. 修改并提交
+4. 推送并创建 PR
 
-### 快速参与方式
-
-1. **报告 Bug** → [GitHub Issues](https://github.com/luoboask/evo-cortex/issues)
-2. **建议功能** → [功能请求模板](https://github.com/luoboask/evo-cortex/issues/new?template=feature_request.md)
-3. **改进文档** → 提交 PR
-4. **分享反馈** → 参与 [Discussions](https://github.com/luoboask/evo-cortex/discussions)
-
-### 开发环境设置
-
-```bash
-# Fork 并克隆
-git clone https://github.com/luoboask/evo-cortex.git
-cd evo-cortex
-
-# 创建分支
-git checkout -b feature/your-feature
-
-# 修改并提交
-git commit -m "feat: add your feature"
-
-# 推送并创建 PR
-git push origin feature/your-feature
-```
-
-详细指南请查看 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+详见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
 ---
 
-## 💬 社区
-
-| 平台 | 用途 | 链接 |
-|------|------|------|
-| **GitHub** | 代码、问题、PR | [仓库](https://github.com/luoboask/evo-cortex) |
-| **Discord** | 聊天、支持 | [OpenClaw 服务器](https://discord.gg/clawd) |
-| **npm** | 包统计 | [@evo-agents/evo-cortex](https://www.npmjs.com/package/@evo-agents/evo-cortex) |
-| **文档** | 官方文档 | [OpenClaw Docs](https://docs.openclaw.ai) |
-
-**需要帮助？**
-- 🐛 Bug 报告：[Issues](https://github.com/luoboask/evo-cortex/issues)
-- 💡 功能建议：[Discussions](https://github.com/luoboask/evo-cortex/discussions)
-- ❓ 问题咨询：Discord 或 GitHub Discussions
-
----
-
-## 🙏 致谢
-
-由 Evo-Agents Team 为 OpenClaw 社区用心打造。
-
-特别感谢：
-- 所有贡献者和早期采用者
-- OpenClaw 核心团队
-- 更广泛的 AI 智能体社区
-
----
-
-## 📄 许可证
+## 许可证
 
 [MIT 许可证](./LICENSE) — 可自由使用、修改和分发。
 
@@ -291,18 +247,18 @@ git push origin feature/your-feature
 
 <div align="center">
 
-**🧬 准备好给您的智能体一个大脑了吗？**
+**准备好给您的智能体一个大脑了吗？**
 
 ```bash
 openclaw plugins install @evo-agents/evo-cortex
 ```
 
-[开始使用](#-快速开始) • [查看文档](./docs/) • [GitHub 加星](https://github.com/luoboask/evo-cortex/stargazers)
+[开始使用](#快速开始) · [查看文档](./docs/) · [GitHub 加星](https://github.com/luoboask/evo-cortex/stargazers)
 
 ---
 
-由 **Evo-Agents Team** 用心制作 ❤️ | v1.0.0 • 2026 年 4 月 21 日
+由 **Evo-Agents Team** 用心打造 | v1.3.0
 
-[🔝 返回顶部](#-evocortex)
+[返回顶部](#evo-cortex)
 
 </div>
