@@ -18,6 +18,7 @@ import { getCache } from "./utils/cache";
 import { runHealthCheck, formatHealthReport } from "./tools/health-check";
 import { checkAndPrompt, markAsConfigured, isCronConfigured } from "./utils/cron-auto-setup";
 import { EvolutionScheduler } from "./evolution/scheduler";
+import { runSelfCheck, formatSelfCheckReport } from "./tools/self-check";
 
 // Agent-isolated MemoryIndexer singletons: one per agent
 const sharedMemoryIndexers = new Map<string, MemoryIndexer>();
@@ -896,6 +897,47 @@ const plugin = {
           } catch (error: any) {
             toolLogger.error('Validation failed', error);
             return { content: [{ type: "text" as const, text: `Error: ${error.message}` }] };
+          }
+        }
+      };
+    });
+
+    // 22. 自检工具 — 全面检查插件各项功能
+    api.registerTool((ctx: OpenClawPluginToolContext) => {
+      const pluginCtx = buildPluginContext(ctx, api);
+      const toolLogger = getLogger({
+        agentId: pluginCtx.agentId,
+        component: 'self_check',
+        verbose: config.verbose
+      });
+
+      return {
+        name: "self_check",
+        description: "自检工具：检查数据库、文件系统、索引、进化系统等所有组件",
+        parameters: Type.Object({
+          format: Type.Optional(Type.String({
+            description: "输出格式：text（人类可读）或 json",
+            enum: ["text", "json"],
+            default: "text"
+          }))
+        }),
+        async execute(_id: string, params: any) {
+          try {
+            toolLogger.info('Running self-check...');
+            const results = await runSelfCheck(pluginCtx);
+            const hasErrors = results.some(r => r.status === 'error');
+            const hasWarnings = results.some(r => r.status === 'warn');
+
+            if (params.format === 'json') {
+              return { content: [{ type: "text" as const, text: JSON.stringify(results, null, 2) }] };
+            }
+
+            const report = formatSelfCheckReport(results);
+            toolLogger.info(`Self-check: ${hasErrors ? 'ERRORS' : hasWarnings ? 'WARNINGS' : 'OK'}`);
+            return { content: [{ type: "text" as const, text: report }] };
+          } catch (error: any) {
+            toolLogger.error('Self-check failed', error);
+            return { content: [{ type: "text" as const, text: `自检失败: ${error.message}` }] };
           }
         }
       };
