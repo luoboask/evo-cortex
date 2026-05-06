@@ -256,7 +256,7 @@ const plugin = {
       });
       const dataDir = getDataDir(pluginCtx);
       const ks = new KnowledgeSystem(pluginCtx.agentId, dataDir);
-      ks.init().catch(err => console.error('[evo-cortex] KnowledgeSystem init error:', err));
+      ks.init().catch(err => getLogger({ component: 'search_knowledge' }).error('KnowledgeSystem init error', err));
 
       return {
         name: "search_knowledge",

@@ -6,6 +6,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { getLogger } from './logger';
+
+const logger = getLogger({ component: 'CronAutoSetup' });
 
 const CRON_SETUP_MARKER = '.evo-cortex-crons-configured';
 
@@ -86,8 +89,8 @@ export function getSetupPrompt(agentId: string): string {
  */
 export function checkAndPrompt(workspaceDir: string, agentId: string): void {
   if (!isCronConfigured(workspaceDir)) {
-    console.log(getSetupPrompt(agentId));
-    console.log('\n💡 提示：此消息只会显示一次。\n');
+    logger.info(getSetupPrompt(agentId));
+    logger.info('此消息只会显示一次。');
   }
 }
 

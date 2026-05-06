@@ -2,6 +2,8 @@
  * Evo-Cortex 统一错误处理
  */
 
+import { getLogger } from './logger';
+
 /**
  * 错误代码枚举
  */
@@ -147,7 +149,7 @@ export class ErrorHandler {
     }
 
     // 输出到控制台（生产环境可以发送到错误收集服务）
-    console.error(`[EVO-${evoError.code}] ${evoError.message}`, {
+    getLogger({ component: 'ErrorHandler' }).error(`${evoError.code}: ${evoError.message}`, {
       context: evoError.context || context,
       timestamp: evoError.timestamp,
     });

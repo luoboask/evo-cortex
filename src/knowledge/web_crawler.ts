@@ -8,6 +8,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { getLogger } from '../utils/logger';
 
 export interface CrawledPage {
   url: string;
@@ -29,6 +30,7 @@ export interface CrawlConfig {
 }
 
 export class WebCrawler {
+  private logger = getLogger({ component: 'WebCrawler' });
   private config: Required<CrawlConfig>;
   private inMemoryCache: Map<string, { page: CrawledPage; expiresAt: number }>;
 
@@ -98,7 +100,7 @@ export class WebCrawler {
     // 尝试获取缓存
     const cached = this.getCache(url);
     if (cached) {
-      console.log(`[WebCrawler] Cache hit: ${url}`);
+      this.logger.info(`Cache hit: ${url}`);
       return cached;
     }
 
@@ -129,7 +131,7 @@ export class WebCrawler {
     // 缓存
     this.setCache(url, page);
 
-    console.log(`[WebCrawler] Crawled: ${url} (${page.title})`);
+    this.logger.info(`Crawled: ${url} (${page.title})`);
     return page;
   }
 
@@ -144,7 +146,7 @@ export class WebCrawler {
       const batch = queue.splice(0, concurrency);
       const promises = batch.map(url =>
         this.crawl(url).catch(error => {
-          console.error(`[WebCrawler] Failed to crawl ${url}:`, error);
+          this.logger.error(`Failed to crawl ${url}`, error);
           return null;
         })
       );
@@ -157,7 +159,7 @@ export class WebCrawler {
       }
     }
 
-    console.log(`[WebCrawler] Batch crawled: ${results.length}/${urls.length}`);
+    this.logger.info(`Batch crawled: ${results.length}/${urls.length}`);
     return results;
   }
 

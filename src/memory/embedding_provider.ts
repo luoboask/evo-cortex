@@ -11,6 +11,9 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { getLogger } from '../utils/logger';
+
+const logger = getLogger({ component: 'EmbeddingProvider' });
 
 // ========== 配置 ==========
 
@@ -71,10 +74,10 @@ function loadMemorySearchConfig(): MemorySearchConfig | null {
       apiKey: ms.remote?.apiKey || '',
     };
 
-    console.log(`[EmbeddingProvider] OpenClaw memorySearch: provider=${memorySearchConfig.provider}, model=${memorySearchConfig.model}, baseUrl=${memorySearchConfig.baseUrl}`);
+    logger.info(`OpenClaw memorySearch: provider=${memorySearchConfig.provider}, model=${memorySearchConfig.model}, baseUrl=${memorySearchConfig.baseUrl}`);
     return memorySearchConfig;
   } catch (err) {
-    console.error('[EmbeddingProvider] Failed to load memorySearch config:', err);
+    logger.error('Failed to load memorySearch config', err);
     memorySearchConfig = null;
     return null;
   }
@@ -134,7 +137,7 @@ async function tryOllamaEmbedding(texts: string[]): Promise<(number[] | null)[]>
     });
 
     if (!resp.ok) {
-      console.warn(`[EmbeddingProvider] Ollama embedding failed: ${resp.status}`);
+      logger.warn(`Ollama embedding failed: ${resp.status}`);
       return texts.map(() => null);
     }
 
@@ -151,7 +154,7 @@ async function tryOllamaEmbedding(texts: string[]): Promise<(number[] | null)[]>
       return results;
     }
   } catch (err: any) {
-    console.warn(`[EmbeddingProvider] Ollama embedding error: ${err.message}`);
+    logger.warn(`Ollama embedding error: ${err.message}`);
   }
   return texts.map(() => null);
 }

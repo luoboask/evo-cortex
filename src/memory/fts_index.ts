@@ -9,6 +9,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { createRequire } from 'module';
 import { getDataDir, PluginContext } from '../utils/plugin-context';
+import { getLogger } from '../utils/logger';
 
 // ========== 类型 ==========
 
@@ -29,6 +30,7 @@ export interface FtsSearchResult {
 // ========== FtsIndex ==========
 
 export class FtsIndex {
+  private logger = getLogger({ component: 'FtsIndex' });
   private dbPath: string;
   private db: any = null;
   private initialized = false;
@@ -64,7 +66,7 @@ export class FtsIndex {
       )`);
     });
     this.initialized = true;
-    console.log(`[FtsIndex] Initialized: ${this.dbPath}`);
+    this.logger.info(`Initialized: ${this.dbPath}`);
   }
 
   /** 确保已初始化 */

@@ -7,6 +7,9 @@
 import type { MemoryConfig } from "../memory/memory_hub";
 import type { KnowledgeConfig } from "../knowledge/knowledge_system";
 import type { EvolutionConfig } from "../evolution/scheduler";
+import { getLogger } from './logger';
+
+const logger = getLogger({ component: 'ConfigValidator' });
 
 export type EmbeddingMode = "auto" | "semantic" | "keyword";
 export type EmbeddingFallback = "fts" | "keyword";
@@ -152,7 +155,7 @@ function validateMemoryConfig(input: any): Partial<MemoryConfig> {
   if (typeof input.top_k === 'number' && input.top_k > 0 && input.top_k <= 100) {
     config.top_k = input.top_k;
   } else if (input.top_k !== undefined) {
-    console.warn(`[Config] Invalid memory.top_k: ${input.top_k}. Must be 1-100.`);
+    logger.warn(`Invalid memory.top_k: ${input.top_k}. Must be 1-100.`);
   }
 
   if (typeof input.auto_store === 'boolean') {
@@ -213,13 +216,13 @@ function validateEmbeddingConfig(input: any): Partial<EmbeddingConfig> {
   if (input.mode === 'auto' || input.mode === 'semantic' || input.mode === 'keyword') {
     config.mode = input.mode;
   } else if (input.mode !== undefined) {
-    console.warn(`[Config] Invalid embedding.mode: ${input.mode}. Must be auto|semantic|keyword.`);
+    logger.warn(`Invalid embedding.mode: ${input.mode}. Must be auto|semantic|keyword.`);
   }
 
   if (input.fallback === 'fts' || input.fallback === 'keyword') {
     config.fallback = input.fallback;
   } else if (input.fallback !== undefined) {
-    console.warn(`[Config] Invalid embedding.fallback: ${input.fallback}. Must be fts|keyword.`);
+    logger.warn(`Invalid embedding.fallback: ${input.fallback}. Must be fts|keyword.`);
   }
 
   return config;
@@ -234,19 +237,19 @@ function validateRetentionConfig(input: any): Partial<RetentionPolicy> {
   if (typeof input.daily === 'number' && input.daily > 0 && input.daily <= 365) {
     config.daily = input.daily;
   } else if (input.daily !== undefined) {
-    console.warn(`[Config] Invalid retention.daily: ${input.daily}. Must be 1-365.`);
+    logger.warn(`Invalid retention.daily: ${input.daily}. Must be 1-365.`);
   }
 
   if (typeof input.weekly === 'number' && input.weekly > 0 && input.weekly <= 52) {
     config.weekly = input.weekly;
   } else if (input.weekly !== undefined) {
-    console.warn(`[Config] Invalid retention.weekly: ${input.weekly}. Must be 1-52.`);
+    logger.warn(`Invalid retention.weekly: ${input.weekly}. Must be 1-52.`);
   }
 
   if (typeof input.monthly === 'number' && input.monthly > 0 && input.monthly <= 24) {
     config.monthly = input.monthly;
   } else if (input.monthly !== undefined) {
-    console.warn(`[Config] Invalid retention.monthly: ${input.monthly}. Must be 1-24.`);
+    logger.warn(`Invalid retention.monthly: ${input.monthly}. Must be 1-24.`);
   }
 
   return config;

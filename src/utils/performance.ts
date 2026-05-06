@@ -2,6 +2,8 @@
  * 性能监控工具
  */
 
+import { getLogger } from './logger';
+
 export interface PerformanceMetrics {
   label: string;
   duration: number;
@@ -11,6 +13,7 @@ export interface PerformanceMetrics {
 
 export class PerformanceMonitor {
   private static instance: PerformanceMonitor;
+  private logger = getLogger({ component: 'PerformanceMonitor' });
   private metrics: Array<PerformanceMetrics> = [];
   private timers: Map<string, number> = new Map();
   private maxMetricsSize = 1000;
@@ -42,7 +45,7 @@ export class PerformanceMonitor {
     const startTime = this.timers.get(label);
     
     if (startTime === undefined) {
-      console.warn(`[Perf] Timer "${label}" not started`);
+      this.logger.warn(`Timer "${label}" not started`);
       return 0;
     }
 
@@ -65,7 +68,7 @@ export class PerformanceMonitor {
 
     // 输出慢操作警告
     if (duration > 1000) {
-      console.warn(`[Perf] Slow operation: ${label} took ${duration.toFixed(2)}ms`);
+      this.logger.warn(`Slow operation: ${label} took ${duration.toFixed(2)}ms`);
     }
 
     return duration;

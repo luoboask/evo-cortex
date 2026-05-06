@@ -9,6 +9,8 @@
 
 // ========== 熔断器 ==========
 
+import { getLogger } from '../utils/logger';
+
 export interface CircuitBreakerState {
   failures: number;
   lastFailure: number;
@@ -107,7 +109,7 @@ export async function safeHook<T>(
     m.totalLatencyMs += Date.now() - start;
     m.lastError = err instanceof Error ? err.message : String(err);
     m.lastChecked = new Date().toISOString();
-    console.error(`[HookHealth] ${hookName} failed:`, m.lastError);
+    getLogger({ component: 'HookHealth' }).error(`${hookName} failed:`, m.lastError);
     return fallback;
   }
 }

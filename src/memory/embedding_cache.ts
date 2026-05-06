@@ -4,6 +4,8 @@
  * LRU 缓存，支持多 Agent 隔离
  */
 
+import { getLogger } from '../utils/logger';
+
 export interface EmbeddingCacheConfig {
   maxSize: number;
   ttlMs: number;
@@ -16,6 +18,7 @@ interface CacheEntry {
 }
 
 export class EmbeddingCache {
+  private logger = getLogger({ component: 'EmbeddingCache' });
   private cache: Map<string, CacheEntry>;
   private config: EmbeddingCacheConfig;
   private hits: number = 0;
@@ -153,7 +156,7 @@ export class EmbeddingCache {
       }
     }
 
-    console.log(`[EmbeddingCache] Cleaned ${cleaned} expired entries`);
+    this.logger.info(`Cleaned ${cleaned} expired entries`);
     return cleaned;
   }
 

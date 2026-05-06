@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { getKnowledgeStorageDir } from '../utils/plugin-context';
 import type { PluginContext } from '../utils/plugin-context';
+import { getLogger } from '../utils/logger';
 
 // ========== 类型定义 ==========
 
@@ -87,6 +88,7 @@ const DEFAULT_CONFIG: RagEvalConfig = {
 // ========== RAG 评估器 ==========
 
 export class RagEvaluator {
+  private logger = getLogger({ component: 'RagEvaluator' });
   private config: RagEvalConfig;
   private metrics: RetrievalMetrics[] = [];
   private currentParams: TuningParams;
@@ -387,7 +389,7 @@ export class RagEvaluator {
         this.metrics = state.metrics || [];
         this.currentParams = state.params || this.currentParams;
         this.tuningHistory = state.tuningHistory || [];
-        console.log(`[RagEvaluator] State loaded: ${this.metrics.length} metrics, ${this.tuningHistory.length} changes`);
+        this.logger.info(`State loaded: ${this.metrics.length} metrics, ${this.tuningHistory.length} changes`);
       }
     } catch { /* ignore */ }
   }
@@ -406,6 +408,6 @@ export class RagEvaluator {
       useKeywordFallback: true
     };
     this.saveState();
-    console.log('[RagEvaluator] State reset');
+    this.logger.info('State reset');
   }
 }

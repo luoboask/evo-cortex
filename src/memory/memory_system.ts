@@ -23,6 +23,7 @@
 import * as path from 'path';
 import * as fs from 'fs';
 import { createRequire } from 'module';
+import { getLogger } from '../utils/logger';
 
 const sqlite3 = createRequire(import.meta.url)('sqlite3').verbose();
 
@@ -224,7 +225,7 @@ export class MemorySystem {
           // 异步触发后续处理（不阻塞）
           this.onRecorded(id, entry, importance).catch((e: Error) => {
             // P2: fire-and-forget 带日志，不吞错误
-            console.warn(`[MemorySystem] onRecorded failed: ${e.message}`);
+            getLogger({ component: 'MemorySystem' }).warn(`onRecorded failed: ${e.message}`);
           });
           resolve(id);
         }
@@ -470,7 +471,7 @@ export class MemorySystem {
         [minImportance, ...params],
         (err: Error | null, rows: any[]) => {
           if (err) {
-            console.warn(`[MemorySystem] searchLTM failed: ${err.message}`);
+            getLogger({ component: 'MemorySystem' }).warn(`searchLTM failed: ${err.message}`);
             resolve([]);
             return;
           }
@@ -511,7 +512,7 @@ export class MemorySystem {
         [...params],
         (err: Error | null, rows: any[]) => {
           if (err) {
-            console.warn(`[MemorySystem] searchWM failed: ${err.message}`);
+            getLogger({ component: 'MemorySystem' }).warn(`searchWM failed: ${err.message}`);
             resolve([]);
             return;
           }
@@ -775,7 +776,7 @@ export class MemorySystem {
       const deleted = this.db.changes;
       return { deleted };
     } catch (err: any) {
-      console.warn(`[MemorySystem] cleanupWorkingMemory failed: ${err.message}`);
+      getLogger({ component: 'MemorySystem' }).warn(`cleanupWorkingMemory failed: ${err.message}`);
       return { deleted: 0 };
     }
   }
