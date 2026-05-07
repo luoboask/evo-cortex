@@ -76,6 +76,16 @@ if [ ! -d "$WORKSPACE_ROOT" ]; then
     echo "   ✅ Workspace 创建完成"
 fi
 
+# 初始化数据库
+if [ "$LANG" = "zh" ]; then
+    echo "📦 初始化数据库..."
+else
+    echo "📦 Initializing database..."
+fi
+
+bash "$SCRIPT_DIR/init-db.sh" "$WORKSPACE_ROOT/data/$AGENT_NAME" >/dev/null 2>&1
+echo "   ✅ 数据库初始化完成"
+
 cd "$WORKSPACE_ROOT"
 
 # 检查并安装插件
@@ -122,9 +132,9 @@ echo ""
 # 配置定时任务
 echo ""
 if [ "$LANG" = "zh" ]; then
-    echo "⏰ 配置 Evo-Cortex 定时任务 (full 级别，9 个任务)..."
+    echo "⏰ 配置 Evo-Cortex 定时任务 (7 个任务)..."
 else
-    echo "⏰ Configuring Evo-Cortex cron tasks (full level, 9 tasks)..."
+    echo "⏰ Configuring Evo-Cortex cron tasks (7 tasks)..."
 fi
 echo ""
 
@@ -140,7 +150,7 @@ if [ "$LANG" = "zh" ]; then
     echo ""
     echo "📊 配置摘要:"
     echo "  Agent: $AGENT_NAME"
-    echo "  级别：full (9 个任务)"
+    echo "  级别：full (7 个任务)"
     echo ""
     echo "下一步:"
     echo "  1. 验证配置：$SCRIPT_DIR/verify-setup.sh $AGENT_NAME"
@@ -154,7 +164,7 @@ else
     echo ""
     echo "📊 Configuration Summary:"
     echo "  Agent: $AGENT_NAME"
-    echo "  Level: full (9 tasks)"
+    echo "  Level: full (7 tasks)"
     echo ""
     echo "Next Steps:"
     echo "  1. Verify: $SCRIPT_DIR/verify-setup.sh $AGENT_NAME"

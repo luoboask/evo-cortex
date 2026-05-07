@@ -89,6 +89,47 @@ CREATE TABLE IF NOT EXISTS memory_embeddings (
   created_at TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_memory_id ON memory_embeddings(memory_id);
+
+-- Long-term memory: important events & distilled knowledge
+CREATE TABLE IF NOT EXISTS long_term_memory (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL DEFAULT '',
+  type TEXT,
+  title TEXT,
+  content TEXT NOT NULL,
+  importance REAL DEFAULT 5.0,
+  tags TEXT,
+  metadata TEXT,
+  source TEXT,
+  source_ref TEXT,
+  memory_type TEXT,
+  consolidated_from TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_ltm_session ON long_term_memory(session_id);
+CREATE INDEX IF NOT EXISTS idx_ltm_importance ON long_term_memory(importance);
+
+-- Short-term memory buffer (optional layer)
+CREATE TABLE IF NOT EXISTS short_term_memory (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL DEFAULT '',
+  content TEXT NOT NULL,
+  importance REAL DEFAULT 5.0,
+  tags TEXT,
+  metadata TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_stm_session ON short_term_memory(session_id);
+
+-- Consolidation log: track WM → LTM promotions
+CREATE TABLE IF NOT EXISTS consolidation_log (
+  id TEXT PRIMARY KEY,
+  working_id INTEGER,
+  long_term_id TEXT,
+  reason TEXT,
+  importance REAL,
+  created_at TEXT DEFAULT (datetime('now'))
+);
 SQL
 
 echo "✅ Database initialized"

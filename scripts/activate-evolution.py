@@ -82,7 +82,20 @@ class EvolutionEventExtractor:
         if not self.config.memory_db.exists():
             print(f"❌ 数据库不存在：{self.config.memory_db}")
             return []
-        
+
+        # 防御性：确保表存在
+        conn = sqlite3.connect(self.config.memory_db)
+        try:
+            conn.execute('''CREATE TABLE IF NOT EXISTS long_term_memory (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT DEFAULT '',
+                type TEXT, title TEXT, content TEXT NOT NULL, importance REAL DEFAULT 5.0,
+                tags TEXT, metadata TEXT, source TEXT, source_ref TEXT,
+                memory_type TEXT, consolidated_from TEXT,
+                created_at TEXT DEFAULT (datetime('now')))''')
+            conn.commit()
+        finally:
+            conn.close()
+
         conn = sqlite3.connect(self.config.memory_db)
         try:
             conn.row_factory = sqlite3.Row
