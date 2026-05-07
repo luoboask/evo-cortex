@@ -292,7 +292,7 @@ class RuleWriter:
                 condition TEXT, action TEXT, confidence REAL DEFAULT 0.5,
                 support_count INTEGER DEFAULT 0,
                 created_at TEXT DEFAULT (datetime('now')),
-                updated_at TEXT DEFAULT (datetime('now')))''')
+                last_validated TEXT DEFAULT (datetime('now')))''')
             stats = {'inserted': 0, 'updated': 0, 'skipped': 0}
 
             for rule in rules:
@@ -305,7 +305,7 @@ class RuleWriter:
                     new_conf = max(existing[1], rule['confidence'])
                     cur.execute('''
                         UPDATE rules
-                        SET confidence = ?, action = ?, updated_at = datetime('now'),
+                        SET confidence = ?, action = ?, last_validated = datetime('now'),
                             support_count = COALESCE(support_count, 0) + 1
                         WHERE id = ?
                     ''', (new_conf, rule['action'], existing[0]))

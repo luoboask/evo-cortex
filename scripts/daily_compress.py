@@ -36,43 +36,29 @@ def get_db(path):
 
 
 def consolidate():
-    """晋升 working_memory 中最新 100 条之后且 importance >= 5.0 的条目到长期记忆"""
+    """清理过期的工作记忆，统计各层记忆数量。
+
+    注意：working_memory 没有 type/title/importance 等结构化列，
+    不做 WM→LTM 的字段映射晋升（由 activate-evolution 负责从 LTM 提取规则）。
+    """
     if not os.path.exists(MEMORY_DB):
         print("  ⚠️ memory.db 不存在，跳过")
         return 0
 
     db = get_db(MEMORY_DB)
     try:
-        # 晋升（最新 100 条之后的，importance 达标即晋升）
-        rows = db.execute("""
-            SELECT * FROM working_memory 
-            WHERE importance >= 5.0
-              AND id NOT IN (
-                  SELECT id FROM working_memory ORDER BY created_at DESC LIMIT 100
-              )
-        """).fetchall()
-
-        promoted = 0
-        for row in rows:
-            ltm_id = f"ltm_{int(datetime.now().timestamp() * 1000)}_{os.urandom(3).hex()}"
-            db.execute("""
-                INSERT INTO long_term_memory 
-                (id, type, title, content, importance, tags, source, source_ref, created_at, consolidated_from)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                ltm_id, row['type'], row['title'], row['content'],
-                row['importance'], row['tags'], row['source'], row['source_ref'],
-                row['created_at'], row['id']
-            ))
-            db.execute("""
-                INSERT INTO consolidation_log (id, working_id, long_term_id, reason, importance)
-                VALUES (?, ?, ?, 'daily_compress', ?)
-            """, (f"cl_{ltm_id}", row['id'], ltm_id, row['importance']))
-            db.execute("DELETE FROM working_memory WHERE id = ?", (row['id'],))
-            promoted += 1
-
+        # 清理过期工作记忆
+        db.execute("""
+            DELETE FROM working_memory
+            WHERE expires_at < datetime('now')
+        """)
+        cleaned = db.total_changes
         db.commit()
-        return promoted
+
+        if cleaned > 0:
+            print(f"  清理过期工作记忆: {cleaned} 条")
+
+        return cleaned
     finally:
         db.close()
 

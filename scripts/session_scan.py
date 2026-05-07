@@ -537,16 +537,16 @@ class DailyReportGenerator:
             cursor = conn.cursor()
             
             # 检查表是否存在
-            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='session_memories'")
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='session_messages'")
             if not cursor.fetchone():
-                print("⏭️  session_memories 表不存在")
+                print("⏭️  session_messages 表不存在")
                 return
-            
+
             # 获取今天的记录
             today_start = datetime.now().strftime('%Y-%m-%d') + ' 00:00:00'
             cursor.execute("""
-                SELECT id, session_id, content, importance, created_at, tags
-                FROM session_memories
+                SELECT id, session_id, content, created_at
+                FROM session_messages
                 WHERE date(created_at) = date(?)
                 ORDER BY created_at ASC
             """, (today_start,))
@@ -690,28 +690,28 @@ class DataCleaner:
             conn = sqlite3.connect(str(self.config.db_path))
             cursor = conn.cursor()
             # 获取所有 session_id
-            cursor.execute("SELECT DISTINCT session_id FROM session_memories")
+            cursor.execute("SELECT DISTINCT session_id FROM session_messages")
             sessions = [row[0] for row in cursor.fetchall()]
-            
+
             total_cleaned = 0
-            
+
             for session_id in sessions:
                 # 计算每个 session 的记录数
                 cursor.execute(
-                    "SELECT COUNT(*) FROM session_memories WHERE session_id = ?",
+                    "SELECT COUNT(*) FROM session_messages WHERE session_id = ?",
                     (session_id,)
                 )
                 count = cursor.fetchone()[0]
-                
+
                 if count > max_per_session:
                     # 删除最老的记录
                     to_delete = count - max_per_session
-                    
+
                     cursor.execute("""
-                        DELETE FROM session_memories
+                        DELETE FROM session_messages
                         WHERE session_id = ?
                         AND id IN (
-                            SELECT id FROM session_memories
+                            SELECT id FROM session_messages
                             WHERE session_id = ?
                             ORDER BY created_at ASC
                             LIMIT ?
@@ -781,13 +781,10 @@ class StatsReporter:
             # 会话统计
             print("💬 会话记忆:")
             try:
-                cursor.execute("SELECT COUNT(*) FROM session_memories")
+                cursor.execute("SELECT COUNT(*) FROM session_messages")
                 print(f"  • 存储的会话记录：{cursor.fetchone()[0]} 条")
-                
-                cursor.execute("SELECT COUNT(*) FROM raw_sessions")
-                print(f"  • 扫描的原始会话：{cursor.fetchone()[0]} 个")
             except:
-                print("  • session_memories 表不存在")
+                print("  • session_messages 表不存在")
             
             print()
             
@@ -991,179 +988,3 @@ def _run_main_logic():
 
 if __name__ == '__main__':
     main()
-
-
-# ────────────────────────────────────────────────
-# 第 6 部分：记忆分层整合（新增）
-# ────────────────────────────────────────────────
-
-class MemoryConsolidator:
-    """记忆整合器 - 实现 4 层架构的自动流转"""
-    
-    def __init__(self, config: Config):
-        self.config = config
-        self.db_path = config.data_dir / 'memory.db'
-    
-    def consolidate_all(self) -> Dict[str, int]:
-        """执行完整的记忆整合流程"""
-        stats = {
-            'working_to_short': 0,
-            'short_to_long': 0,
-            'expired_cleaned': 0
-        }
-        
-        # 1. 工作记忆 → 短期记忆（对话结束）
-        stats['working_to_short'] = self._consolidate_working_to_short()
-        
-        # 2. 短期记忆 → 长期记忆（重要性≥7）
-        stats['short_to_long'] = self._consolidate_short_to_long()
-        
-        # 3. 清理过期工作记忆（>2 小时）
-        stats['working_expired'] = self._clean_expired_working_memory()
-        
-        # 4. 清理过期短期记忆（>30 天）
-        stats['expired_cleaned'] = self._clean_expired_short_term()
-        
-        return stats
-    
-    def _consolidate_working_to_short(self) -> int:
-        """将结束的工作记忆转移到短期记忆"""
-        # 简化版：实际应该检测会话是否结束
-        # 这里暂时跳过，因为当前没有使用 working_memory
-        return 0
-    
-    def _consolidate_short_to_long(self) -> int:
-        """将高重要性短期记忆整合到长期记忆"""
-        conn = sqlite3.connect(str(self.db_path))
-        try:
-            cursor = conn.cursor()
-            
-            # 查找 importance >= 7 且未整合的记录
-            cursor.execute('''
-                INSERT OR IGNORE INTO long_term_memory 
-                (session_id, content, memory_type, importance, tags, metadata, consolidated_from)
-                SELECT 
-                    session_id,
-                    content,
-                    'important_event',
-                    importance,
-                    tags,
-                    metadata,
-                    'short_term'
-                FROM short_term_memory
-                WHERE importance >= 7.0
-                AND session_id NOT IN (SELECT session_id FROM long_term_memory)
-            ''')
-            
-            moved = cursor.rowcount
-            conn.commit()
-        finally:
-            conn.close()
-        
-        if moved > 0:
-            print(f"   ✅ 整合 {moved} 条高重要性记忆到长期存储")
-        
-        return moved
-    
-    def _clean_expired_working_memory(self) -> int:
-        """清理过期的工作记忆（>2 小时）"""
-        conn = sqlite3.connect(str(self.db_path))
-        try:
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                DELETE FROM working_memory
-                WHERE expires_at < datetime('now')
-            """)
-            
-            deleted = cursor.rowcount
-            conn.commit()
-        finally:
-            conn.close()
-        
-        if deleted > 0:
-            print(f"   🗑️  清理 {deleted} 条过期工作记忆")
-        
-        return deleted
-    
-    def _clean_expired_short_term(self) -> int:
-        """清理过期的短期记忆（>30 天）"""
-        conn = sqlite3.connect(str(self.db_path))
-        try:
-            cursor = conn.cursor()
-            
-            cursor.execute('''
-                DELETE FROM short_term_memory
-                WHERE expires_at < datetime('now')
-                AND session_id NOT IN (
-                    SELECT session_id FROM long_term_memory
-                )
-            ''')
-            
-            deleted = cursor.rowcount
-            conn.commit()
-        finally:
-            conn.close()
-        
-        if deleted > 0:
-            print(f"   🗑️  清理 {deleted} 条过期短期记忆")
-        
-        return deleted
-    
-    def get_stats(self) -> Dict:
-        """获取各层记忆的统计信息"""
-        conn = sqlite3.connect(str(self.db_path))
-        try:
-            cursor = conn.cursor()
-            
-            stats = {}
-            
-            # 工作记忆
-            cursor.execute('SELECT COUNT(*) FROM working_memory')
-            stats['working_count'] = cursor.fetchone()[0]
-            
-            # 短期记忆
-            cursor.execute('SELECT COUNT(*) FROM short_term_memory')
-            stats['short_count'] = cursor.fetchone()[0]
-            
-            cursor.execute('SELECT COUNT(*) FROM short_term_memory WHERE expires_at < datetime("now", "+7 days")')
-            stats['short_expiring_soon'] = cursor.fetchone()[0]
-            
-            # 长期记忆
-            cursor.execute('SELECT COUNT(*) FROM long_term_memory')
-            stats['long_count'] = cursor.fetchone()[0]
-            
-            cursor.execute('SELECT AVG(importance) FROM long_term_memory')
-            stats['long_avg_importance'] = round(cursor.fetchone()[0] or 0, 2)
-            
-            return stats
-        finally:
-            conn.close()
-
-
-# ────────────────────────────────────────────────
-# 在主函数中调用整合逻辑
-# ────────────────────────────────────────────────
-
-def run_consolidation(config: Config):
-    """运行记忆整合流程"""
-    print("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    print("🧠 第 6 部分：记忆分层整合...")
-    print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
-    
-    consolidator = MemoryConsolidator(config)
-    stats = consolidator.consolidate_all()
-    
-    print(f"\n📊 整合结果:")
-    print(f"   工作→短期：{stats['working_to_short']} 条")
-    print(f"   短期→长期：{stats['short_to_long']} 条")
-    print(f"   清理过期：{stats['expired_cleaned']} 条")
-    
-    # 显示各层统计
-    layer_stats = consolidator.get_stats()
-    print(f"\n💾 当前各层记忆:")
-    print(f"   工作记忆：{layer_stats['working_count']} 条")
-    print(f"   短期记忆：{layer_stats['short_count']} 条 ({layer_stats['short_expiring_soon']} 条即将过期)")
-    print(f"   长期记忆：{layer_stats['long_count']} 条 (平均重要性⭐{layer_stats['long_avg_importance']})")
-    
-    return stats

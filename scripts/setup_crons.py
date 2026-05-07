@@ -87,7 +87,7 @@ def main():
         {
             "name": "daily-compress",
             "cron": "30 9 * * *",
-            "message": f"执行记忆压缩。调用工具：memory_compress {{\"granularity\": \"daily\"}}",
+            "message": f"Run: python3 {scripts_dir}/daily_compress.py {agent_name}\nOutput the script output as-is. No analysis.",
             "timeout": 180,
         },
     ]

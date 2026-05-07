@@ -94,21 +94,19 @@ class UnifiedSearcher:
                            WHEN sm.content LIKE ? THEN 2
                            ELSE 1
                        END as relevance
-                FROM session_memories sm
+                FROM session_messages sm
                 WHERE sm.content LIKE ?
-                ORDER BY sm.importance DESC, sm.created_at DESC
+                ORDER BY sm.created_at DESC
                 LIMIT ?
             """, (f'%{query}%', f'%{query.lower()}%', f'%{query}%', limit))
 
             for row in cursor.fetchall():
                 results.append({
                     'type': 'memory',
-                    'source': 'session_memories',
+                    'source': 'session_messages',
                     'id': row['id'],
                     'session_id': row['session_id'][:8] + '...',
                     'content': row['content'][:200] + '...' if len(row['content']) > 200 else row['content'],
-                    'importance': row['importance'],
-                    'tags': row['tags'],
                     'created_at': row['created_at'],
                     'relevance': row['relevance']
                 })
@@ -131,17 +129,17 @@ class UnifiedSearcher:
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
 
-            # 简化查询（不关联 category 表）
+            # 简化查询
             cursor.execute("""
                 SELECT *,
                        CASE
-                           WHEN text LIKE ? THEN 3
-                           WHEN text LIKE ? THEN 2
+                           WHEN value LIKE ? THEN 3
+                           WHEN value LIKE ? THEN 2
                            ELSE 1
                        END as relevance
                 FROM preferences
-                WHERE text LIKE ?
-                ORDER BY confidence DESC, created_at DESC
+                WHERE value LIKE ?
+                ORDER BY confidence DESC, extracted_at DESC
                 LIMIT ?
             """, (f'%{query}%', f'%{query.lower()}%', f'%{query}%', limit))
 
@@ -150,11 +148,11 @@ class UnifiedSearcher:
                     'type': 'preference',
                     'source': 'preferences',
                     'id': row['id'],
-                    'text': row['text'],
+                    'text': row['value'],
                     'category': row['category'] if 'category' in row.keys() else 'N/A',
                     'confidence': row['confidence'],
-                    'status': row['status'],
-                    'created_at': row['created_at'],
+                    'confirmed': row.get('confirmed', 0),
+                    'created_at': row['extracted_at'],
                     'relevance': row['relevance']
                 })
 
